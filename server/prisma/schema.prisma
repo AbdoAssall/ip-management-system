@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  username     String     @unique
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  fullName     String     @map("full_name")
+  roleId       String     @map("role_id")
+  role         Role       @relation(fields: [roleId], references: [id])
+  isActive     Boolean    @default(true) @map("is_active")
+  lastLogin    DateTime?  @map("last_login")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String @id @default(uuid())
+  name        String @unique
+  description String
+  permissions Json   @default("[]")
+
+  users User[]
+
+  @@map("roles")
+}
+
+model Device {
+  id                String   @id @default(uuid())
+  deviceName        String   @map("device_name")
+  assetTag          String   @unique @map("asset_tag")
+  categoryId        String   @map("category_id")
+  category          DeviceCategory @relation(fields: [categoryId], references: [id])
+  brand             String
+  model             String
+  serialNumber      String   @unique @map("serial_number")
+  hostname          String
+  status            String   @default("Online")
+  purchaseDate      DateTime? @map("purchase_date")
+  warrantyExpiration DateTime? @map("warranty_expiration")
+  notes             String?
+
+  // Network
+  macAddress     String?  @map("mac_address")
+  subnetMask     String?  @map("subnet_mask")
+  defaultGateway String?  @map("default_gateway")
+  dns            String?
+  dhcpStatic     String?  @default("Static") @map("dhcp_static")
+
+  // Location
+  branchId     String?  @map("branch_id")
+  branch       Branch?  @relation(fields: [branchId], references: [id])
+  departmentId String?  @map("department_id")
+  department   Department? @relation(fields: [departmentId], references: [id])
+  building     String?
+  floor        String?
+  room         String?
+
+  // Responsible Person
+  employeeId String?  @map("employee_id")
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  // Security
+  lastMaintenance   DateTime? @map("last_maintenance")
+  securityLevel     String?   @default("Medium") @map("security_level")
+  backupStatus      String?   @default("N/A") @map("backup_status")
+  monitoringEnabled Boolean   @default(false) @map("monitoring_enabled")
+
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ipAddresses        IPAddress[]
+  maintenanceRecords MaintenanceRecord[]
+  warrantyRecords    WarrantyRecord[]
+
+  @@index([categoryId], name: "idx_devices_category")
+  @@index([status], name: "idx_devices_status")
+  @@index([branchId], name: "idx_devices_branch")
+  @@map("devices")
+}
+
+model DeviceCategory {
+  id          String @id @default(uuid())
+  name        String @unique
+  icon        String
+  color       String
+  description String?
+
+  devices Device[]
+
+  @@map("device_categories")
+}
+
+model IPAddress {
+  id         String   @id @default(uuid())
+  ipAddress  String   @map("ip_address")
+  deviceId   String?  @map("device_id")
+  device     Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  vlanId     String?  @map("vlan_id")
+  vlan       VLAN?    @relation(fields: [vlanId], references: [id])
+  status     String   @default("Available")
+  type       String   @default("IPv4")
+  notes      String?
+  assignedAt DateTime? @map("assigned_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([deviceId], name: "idx_ip_device")
+  @@index([ipAddress, vlanId], name: "idx_ip_vlan_unique")
+  @@map("ip_addresses")
+}
+
+model VLAN {
+  id          String @id @default(uuid())
+  vlanNumber  Int    @unique @map("vlan_number")
+  name        String
+  subnet      String
+  gateway     String
+  description String?
+
+  ipAddresses IPAddress[]
+
+  @@map("vlans")
+}
+
+model Branch {
+  id      String @id @default(uuid())
+  name    String @unique
+  address String
+  city    String
+
+  departments Department[]
+  devices     Device[]
+
+  @@map("branches")
+}
+
+model Department {
+  id       String @id @default(uuid())
+  name     String
+  branchId String @map("branch_id")
+  branch   Branch @relation(fields: [branchId], references: [id])
+
+  devices   Device[]
+  employees Employee[]
+
+  @@map("departments")
+}
+
+model Employee {
+  id           String @id @default(uuid())
+  fullName     String @map("full_name")
+  employeeCode String @unique @map("employee_code")
+  phone        String?
+  email        String?
+  departmentId String? @map("department_id")
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  devices Device[]
+
+  @@map("employees")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  userId         String?  @map("user_id")
+  user           User?    @relation(fields: [userId], references: [id])
+  action         String
+  entityType     String   @map("entity_type")
+  entityId       String?  @map("entity_id")
+  previousValue  Json?    @map("previous_value")
+  newValue       Json?    @map("new_value")
+  ipAddressSource String? @map("ip_address_source")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt(sort: Desc)], name: "idx_audit_created")
+  @@index([entityType, entityId], name: "idx_audit_entity")
+  @@map("audit_logs")
+}
+
+model Notification {
+  id            String   @id @default(uuid())
+  type          String
+  title         String
+  message       String
+  severity      String   @default("info")
+  userId        String?  @map("user_id")
+  user          User?    @relation(fields: [userId], references: [id])
+  isRead        Boolean  @default(false) @map("is_read")
+  referenceId   String?  @map("reference_id")
+  referenceType String?  @map("reference_type")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+model MaintenanceRecord {
+  id            String   @id @default(uuid())
+  deviceId      String   @map("device_id")
+  device        Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  type          String
+  description   String?
+  scheduledDate DateTime? @map("scheduled_date")
+  completedDate DateTime? @map("completed_date")
+  performedBy   String?  @map("performed_by")
+  status        String   @default("Scheduled")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("maintenance_records")
+}
+
+model WarrantyRecord {
+  id             String   @id @default(uuid())
+  deviceId       String   @map("device_id")
+  device         Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  provider       String
+  contractNumber String?  @map("contract_number")
+  startDate      DateTime @map("start_date")
+  endDate        DateTime @map("end_date")
+  coverageType   String   @default("Full") @map("coverage_type")
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("warranty_records")
+}
