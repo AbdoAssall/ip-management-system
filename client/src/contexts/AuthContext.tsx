@@ -2,8 +2,11 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 import type { User } from '@/types';
 import { mockData } from '@/lib/mockData';
 
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001');
+
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
@@ -18,11 +21,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : null;
   });
 
-  const login = useCallback(async (email: string, _password: string): Promise<boolean> => {
+  const [token, setToken] = useState<string | null>(() => {
+    return localStorage.getItem('pscchc-token');
+  });
+
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    // Try API login first
+    try {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.token && data.user) {
+          setUser(data.user);
+          setToken(data.token);
+          localStorage.setItem('pscchc-user', JSON.stringify(data.user));
+          localStorage.setItem('pscchc-token', data.token);
+          return true;
+        }
+      }
+    } catch {
+      // API not available, fall back to mock
+    }
+
+    // Fallback to mock auth
     const found = mockData.users.find((u) => u.email === email);
     if (found) {
       setUser(found);
+      // Generate a simple mock token for WebSocket (server won't validate in dev if secret matches)
+      const mockToken = 'mock-token-' + found.id;
+      setToken(mockToken);
       localStorage.setItem('pscchc-user', JSON.stringify(found));
+      localStorage.setItem('pscchc-token', mockToken);
       return true;
     }
     return false;
@@ -30,7 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setUser(null);
+    setToken(null);
     localStorage.removeItem('pscchc-user');
+    localStorage.removeItem('pscchc-token');
   }, []);
 
   const hasPermission = useCallback(
@@ -45,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout, hasPermission }}>
+    <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, login, logout, hasPermission }}>
       {children}
     </AuthContext.Provider>
   );

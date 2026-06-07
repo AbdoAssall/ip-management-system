@@ -8,6 +8,7 @@ import {
 } from "@/lib/constants";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWebSocket } from "@/contexts/WebSocketContext";
 import type { Device } from "@/types";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import {
@@ -33,6 +34,9 @@ import {
   Clock,
   ArrowLeft,
   Edit2,
+  Activity,
+  Zap,
+  WifiOff,
 } from "lucide-react";
 
 const iconMap: Record<string, React.ElementType> = {
@@ -51,17 +55,33 @@ const iconMap: Record<string, React.ElementType> = {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { isConnected, deviceStatuses, statusEvents } = useWebSocket();
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [detailTab, setDetailTab] = useState(0);
+
+  // Use live WebSocket data for online/offline counts, fallback to mock
+  const liveStats = useMemo(() => {
+    if (deviceStatuses.size > 0) {
+      let online = 0, offline = 0, maintenance = 0;
+      deviceStatuses.forEach((s) => {
+        if (s.status === 'Online') online++;
+        else if (s.status === 'Offline') offline++;
+        else if (s.status === 'Maintenance') maintenance++;
+      });
+      return { online, offline, maintenance, total: deviceStatuses.size };
+    }
+    return null;
+  }, [deviceStatuses]);
 
   const stats = useMemo(() => {
     const devices = mockData.devices;
     const ips = mockData.ipAddresses;
-    const online = devices.filter((d) => d.status === "Online").length;
-    const offline = devices.filter((d) => d.status === "Offline").length;
-    const maintenance = devices.filter(
+    const online = liveStats?.online ?? devices.filter((d) => d.status === "Online").length;
+    const offline = liveStats?.offline ?? devices.filter((d) => d.status === "Offline").length;
+    const maintenance = liveStats?.maintenance ?? devices.filter(
       (d) => d.status === "Maintenance",
     ).length;
+    const total = liveStats?.total ?? devices.length;
     const assigned = ips.filter((ip) => ip.status === "Assigned").length;
     const available = ips.filter((ip) => ip.status === "Available").length;
     const seen = new Map<string, number>();
@@ -96,7 +116,7 @@ export default function DashboardPage() {
       return diff > 0 && diff < 90;
     }).length;
     return {
-      total: devices.length,
+      total,
       online,
       offline,
       maintenance,
@@ -109,7 +129,7 @@ export default function DashboardPage() {
       recent: devices.slice(-8).reverse(),
       warrantyExpiring,
     };
-  }, []);
+  }, [liveStats]);
 
   const recentActivity = useMemo(() => mockData.auditLogs.slice(0, 5), []);
   const greeting = useMemo(() => {
@@ -422,13 +442,20 @@ export default function DashboardPage() {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
+            gap: 12,
             fontSize: 12,
             color: "var(--text-muted)",
           }}
         >
-          <Clock size={14} /> Last updated:{" "}
-          {formatDateTime(new Date().toISOString())}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 20, background: isConnected ? '#10B98112' : '#EF444412', border: `1px solid ${isConnected ? '#10B98130' : '#EF444430'}` }}>
+            <div className={isConnected ? 'ws-connected-dot' : 'ws-disconnected-dot'} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: isConnected ? '#10B981' : '#EF4444' }}>
+              {isConnected ? 'Live' : 'Offline'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Clock size={14} /> {formatDateTime(new Date().toISOString())}
+          </div>
         </div>
       </div>
 
@@ -1059,17 +1086,23 @@ export default function DashboardPage() {
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <h3
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              marginBottom: 4,
-              fontFamily: "var(--font-heading)",
-            }}
-          >
-            Recent Activity
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <h3
+              style={{
+                fontSize: 15,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                fontFamily: "var(--font-heading)",
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Activity size={16} style={{ color: 'var(--accent-primary)' }} />
+              Live Status Feed
+            </h3>
+            {isConnected && <div className="ping-pulse" />}
+          </div>
           <p
             style={{
               fontSize: 12,
@@ -1077,14 +1110,23 @@ export default function DashboardPage() {
               marginBottom: 16,
             }}
           >
-            Latest audit logs across the system
+            Real-time device connectivity events
           </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-            {recentActivity.map((log) => {
-              const u = mockData.users.find((u) => u.id === log.userId);
+          <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: 320, overflowY: 'auto' }}>
+            {statusEvents.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                <Zap size={20} style={{ marginBottom: 8, opacity: 0.4 }} />
+                <div>No status events yet</div>
+                <div style={{ fontSize: 11, marginTop: 4 }}>Events will appear when devices change state</div>
+              </div>
+            )}
+            {statusEvents.slice(0, 15).map((evt) => {
+              const isDown = evt.newStatus === 'Offline';
+              const isRecovery = evt.previousStatus === 'Offline' && evt.newStatus === 'Online';
               return (
                 <div
-                  key={log.id}
+                  key={evt.id}
+                  className="status-feed-item"
                   style={{
                     display: "flex",
                     alignItems: "flex-start",
@@ -1098,7 +1140,7 @@ export default function DashboardPage() {
                       width: 32,
                       height: 32,
                       borderRadius: "50%",
-                      background: "var(--bg-tertiary)",
+                      background: isDown ? '#EF444415' : isRecovery ? '#10B98115' : 'var(--bg-tertiary)',
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -1106,29 +1148,23 @@ export default function DashboardPage() {
                       marginTop: 2,
                     }}
                   >
-                    <Clock size={14} color="var(--text-muted)" />
+                    {isDown ? <WifiOff size={14} color="#EF4444" /> : <Zap size={14} color={isRecovery ? '#10B981' : 'var(--text-muted)'} />}
                   </div>
-                  <div>
-                    <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
-                      <span style={{ fontWeight: 500 }}>
-                        {u?.username || "system"}
-                      </span>{" "}
-                      <span style={{ color: "var(--text-muted)" }}>
-                        {log.action.toLowerCase()}
-                      </span>{" "}
-                      <span style={{ fontWeight: 500 }}>
-                        {log.entityType.toLowerCase()}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: "var(--text-primary)", display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontWeight: 600 }}>{evt.deviceName}</span>
+                      {evt.isCritical && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 4, background: '#EF444420', color: '#EF4444', fontWeight: 700, textTransform: 'uppercase' }}>Critical</span>}
+                    </div>
+                    <div style={{ fontSize: 12, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: isDown ? '#EF4444' : '#10B981', fontWeight: 500 }}>
+                        {evt.previousStatus} → {evt.newStatus}
                       </span>
+                      {evt.responseTimeMs != null && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{evt.responseTimeMs}ms</span>}
                     </div>
                     <div
-                      style={{
-                        fontSize: 12,
-                        color: "var(--accent-primary)",
-                        marginTop: 2,
-                      }}
+                      style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}
                     >
-                      {u?.username || "system"} •{" "}
-                      {formatDateTime(log.createdAt)}
+                      {evt.category} • {timeAgo(evt.timestamp)}
                     </div>
                   </div>
                 </div>

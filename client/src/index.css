@@ -274,7 +274,7 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="light"] input:not([type="checkbox"]):not([type="radio"]),
 [data-theme="light"] select,
 [data-theme="light"] textarea {
-  border: 1px solid var(--border-primary) !important;
+  border: 1px solid var(--border-primary);
   box-shadow: var(--shadow-input);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -300,3 +300,73 @@ h1, h2, h3, h4, h5, h6 {
 [data-theme="light"] table thead th {
   color: #475569 !important;
 }
+
+/* ===== WebSocket Live Status Indicators ===== */
+@keyframes ws-pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); }
+  50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+}
+
+@keyframes ws-pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+}
+
+@keyframes ping-ripple {
+  0% { width: 8px; height: 8px; opacity: 1; }
+  100% { width: 20px; height: 20px; opacity: 0; }
+}
+
+@keyframes feed-slide-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.ws-connected-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10B981;
+  animation: ws-pulse-green 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.ws-disconnected-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #EF4444;
+  animation: ws-pulse-red 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.ping-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ping-pulse::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-primary);
+  animation: ping-ripple 1.5s ease-out infinite;
+}
+
+.status-feed-item {
+  animation: feed-slide-in 0.3s ease-out forwards;
+}
+
+.status-transition {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+

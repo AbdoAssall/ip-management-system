@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { mockData } from '@/lib/mockData';
 import { DEVICE_CATEGORIES, STATUS_OPTIONS, DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS, DEVICE_BRANDS, SECURITY_LEVELS, BACKUP_STATUSES, DEFAULT_VLANS } from '@/lib/constants';
-import { formatDate, generateId } from '@/lib/utils';
+import { formatDate, formatDateTime, generateId } from '@/lib/utils';
+import { useWebSocket } from '@/contexts/WebSocketContext';
 import type { Device } from '@/types';
-import { Plus, Search, Edit2, Trash2, Eye, ArrowLeft, Monitor, Server, Router, Network, Layers, Laptop, Fingerprint, Camera, Shield, Phone, Wifi, HardDrive, Globe, Save, UserCircle } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Eye, ArrowLeft, Monitor, Server, Router, Network, Layers, Laptop, Fingerprint, Camera, Shield, Phone, Wifi, HardDrive, Globe, Save, UserCircle, Activity, RefreshCw } from 'lucide-react';
 
 const iconMap: Record<string, React.ElementType> = { Router, Network, Layers, Server, Monitor, Laptop, Fingerprint, Camera, Shield, Phone, Wifi };
 const IS: React.CSSProperties = { width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' };
@@ -13,6 +14,7 @@ const SS: React.CSSProperties = { ...IS, appearance: 'none' as const, cursor: 'p
 type Mode = 'list' | 'view' | 'edit' | 'add';
 
 export default function DevicesPage() {
+  const { getDeviceStatus, requestPing, isConnected } = useWebSocket();
   const [devices, setDevices] = useState<Device[]>(mockData.devices);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -78,6 +80,9 @@ export default function DevicesPage() {
       Security: [['Security Level', dev.securityLevel], ['Backup', dev.backupStatus], ['Monitoring', dev.monitoringEnabled ? 'Enabled' : 'Disabled'], ['Last Maintenance', formatDate(dev.lastMaintenance)]],
     } : {};
 
+    // Live ping status for this device
+    const pingStatus = dev ? getDeviceStatus(dev.id) : undefined;
+
     return (
       <div className="animate-fade-in">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
@@ -87,12 +92,27 @@ export default function DevicesPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-heading)' }}>{title}</h2>
                 {(isView || mode === 'edit') && <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, background: status === 'Online' ? '#10B98120' : status === 'Offline' ? '#EF444420' : '#F59E0B20', color: status === 'Online' ? '#10B981' : status === 'Offline' ? '#EF4444' : '#F59E0B', fontWeight: 600 }}>{status}</span>}
+                {isView && pingStatus && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div className={pingStatus.isReachable ? 'ws-connected-dot' : 'ws-disconnected-dot'} />
+                    <span style={{ fontSize: 11, color: pingStatus.isReachable ? '#10B981' : '#EF4444', fontWeight: 500 }}>
+                      {pingStatus.isReachable ? 'Reachable' : 'Unreachable'}
+                    </span>
+                  </div>
+                )}
               </div>
               {dev && <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: cat?.color, display: 'inline-block', marginRight: 6 }} />{cat?.name} • {dev.brand} {dev.model}</div>}
             </div>
           </div>
-          {isView && <button onClick={() => goEdit(dev!)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px', borderRadius: 10, border: 'none', background: 'var(--bg-navy)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}><Edit2 size={14} /> Edit Device</button>}
-          {!isView && <button onClick={save} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #008793, #004D7A)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}><Save size={14} /> {mode === 'edit' ? 'Update' : 'Save Device'}</button>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            {isView && dev && (
+              <button onClick={() => requestPing(dev.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'var(--bg-card)', color: 'var(--text-secondary)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }} title="Ping this device now">
+                <RefreshCw size={14} /> Ping
+              </button>
+            )}
+            {isView && <button onClick={() => goEdit(dev!)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px', borderRadius: 10, border: 'none', background: 'var(--bg-navy)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}><Edit2 size={14} /> Edit Device</button>}
+            {!isView && <button onClick={save} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #008793, #004D7A)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}><Save size={14} /> {mode === 'edit' ? 'Update' : 'Save Device'}</button>}
+          </div>
         </div>
 
         {/* Tabs */}
@@ -103,14 +123,60 @@ export default function DevicesPage() {
         {/* Content */}
         <div style={{ background: 'var(--bg-card)', borderRadius: '0 0 14px 14px', border: '1px solid var(--border-primary)', borderTop: 'none', padding: '28px 32px', boxShadow: 'var(--shadow-card)' }}>
           {isView ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-              {(viewData[tabs[formTab].l] || []).map(([label, value]) => (
-                <div key={label} style={{ padding: '12px 0', borderBottom: '1px solid var(--border-secondary)' }}>
-                  <div style={{ fontSize: 12, color: 'var(--accent-primary)', marginBottom: 4, fontWeight: 500 }}>{label}</div>
-                  <div style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 500 }}>{value || '—'}</div>
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                {(viewData[tabs[formTab].l] || []).map(([label, value]) => (
+                  <div key={label} style={{ padding: '12px 0', borderBottom: '1px solid var(--border-secondary)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--accent-primary)', marginBottom: 4, fontWeight: 500 }}>{label}</div>
+                    <div style={{ fontSize: 15, color: 'var(--text-primary)', fontWeight: 500 }}>{value || '—'}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Live Connectivity Panel — shown only in view mode */}
+              {pingStatus && (
+                <div style={{ marginTop: 20, padding: 20, borderRadius: 12, background: 'var(--bg-tertiary)', border: '1px solid var(--border-secondary)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                    <Activity size={15} style={{ color: 'var(--accent-primary)' }} />
+                    <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-heading)' }}>Live Connectivity</span>
+                    {isConnected && <div className="ping-pulse" style={{ marginLeft: 4 }} />}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Status</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div className={pingStatus.isReachable ? 'ws-connected-dot' : 'ws-disconnected-dot'} />
+                        <span style={{ fontSize: 14, fontWeight: 600, color: pingStatus.isReachable ? '#10B981' : '#EF4444' }}>
+                          {pingStatus.isReachable ? 'Reachable' : 'Unreachable'}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Response Time</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {pingStatus.responseTimeMs != null ? `${pingStatus.responseTimeMs}ms` : '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Last Checked</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                        {formatDateTime(pingStatus.lastChecked)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Last Seen Online</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                        {pingStatus.lastSeenOnline ? formatDateTime(pingStatus.lastSeenOnline) : '—'}
+                      </div>
+                    </div>
+                  </div>
+                  {pingStatus.consecutiveFailures > 0 && (
+                    <div style={{ marginTop: 12, padding: '8px 14px', borderRadius: 8, background: '#EF444410', border: '1px solid #EF444420', fontSize: 12, color: '#EF4444', fontWeight: 500 }}>
+                      ⚠ {pingStatus.consecutiveFailures} consecutive ping failure{pingStatus.consecutiveFailures > 1 ? 's' : ''}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           ) : (
             <>
               {formTab === 0 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><div><label style={LS}>Device Name *</label><input value={form.deviceName} onChange={e => sf('deviceName', e.target.value)} style={IS} /></div><div><label style={LS}>Hostname</label><input value={form.hostname} onChange={e => sf('hostname', e.target.value)} style={IS} /></div><div><label style={LS}>Asset Tag *</label><input value={form.assetTag} onChange={e => sf('assetTag', e.target.value)} style={IS} /></div><div><label style={LS}>Serial Number</label><input value={form.serialNumber} onChange={e => sf('serialNumber', e.target.value)} style={IS} /></div><div><label style={LS}>Category</label><select value={form.categoryId} onChange={e => sf('categoryId', e.target.value)} style={SS}>{DEVICE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div><label style={LS}>Brand</label><select value={form.brand} onChange={e => sf('brand', e.target.value)} style={SS}><option value="">Select</option>{DEVICE_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}</select></div><div><label style={LS}>Model</label><input value={form.model} onChange={e => sf('model', e.target.value)} style={IS} /></div><div><label style={LS}>Status</label><select value={form.status} onChange={e => sf('status', e.target.value)} style={SS}>{STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}</select></div><div><label style={LS}>Purchase Date</label><input type="date" value={form.purchaseDate?.split('T')[0] || ''} onChange={e => sf('purchaseDate', e.target.value)} style={IS} /></div><div><label style={LS}>Warranty Expiration</label><input type="date" value={form.warrantyExpiration?.split('T')[0] || ''} onChange={e => sf('warrantyExpiration', e.target.value)} style={IS} /></div><div style={{ gridColumn: '1/-1' }}><label style={LS}>Notes</label><textarea value={form.notes} onChange={e => sf('notes', e.target.value)} rows={3} style={{ ...IS, resize: 'vertical' }} /></div></div>}
@@ -156,7 +222,7 @@ export default function DevicesPage() {
                 <td style={{ padding: '12px 16px', fontSize: 13, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{dev.ipAddress}</td>
                 <td style={{ padding: '12px 16px' }}><span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: `${cat?.color}15`, color: cat?.color, fontWeight: 500 }}>{cat?.name}</span></td>
                 <td style={{ padding: '12px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{dev.brand} {dev.model}</td>
-                <td style={{ padding: '12px 16px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 7, height: 7, borderRadius: '50%', background: dev.status === 'Online' ? '#10B981' : dev.status === 'Offline' ? '#EF4444' : '#F59E0B' }} /><span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{dev.status}</span></div></td>
+                <td style={{ padding: '12px 16px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div className={(() => { const ps = getDeviceStatus(dev.id); return ps ? (ps.isReachable ? 'ws-connected-dot' : 'ws-disconnected-dot') : ''; })()} style={{ width: 7, height: 7, borderRadius: '50%', background: dev.status === 'Online' ? '#10B981' : dev.status === 'Offline' ? '#EF4444' : '#F59E0B' }} /><span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{dev.status}</span>{(() => { const ps = getDeviceStatus(dev.id); return ps?.responseTimeMs != null ? <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>{ps.responseTimeMs}ms</span> : null; })()}</div></td>
                 <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-muted)' }}>{branch?.name}</td>
                 <td style={{ padding: '12px 16px' }}><div style={{ display: 'flex', gap: 4 }}>
                   <button onClick={() => goView(dev)} style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'var(--bg-tertiary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}><Eye size={14} /></button>

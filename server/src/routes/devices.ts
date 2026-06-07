@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../utils/prisma';
 import { getClientIP, getParam } from '../utils/helpers';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
+import { getMonitorService } from '../services/deviceMonitor';
 
 const router = Router();
 
@@ -54,6 +55,11 @@ router.post('/', authenticate, authorize('Admin', 'IT Manager', 'IT Support'), a
   try {
     const device = await prisma.device.create({ data: { ...req.body, createdBy: req.userId }, include: { category: true } });
     await prisma.auditLog.create({ data: { userId: req.userId!, action: 'CREATE', entityType: 'Device', entityId: device.id, newValue: { deviceName: device.deviceName, assetTag: device.assetTag } as any, ipAddressSource: getClientIP(req) } });
+
+    // Notify monitor of new device
+    const monitor = getMonitorService();
+    if (monitor) monitor.onDeviceChanged(device.id);
+
     res.status(201).json(device);
   } catch (err) {
     res.status(400).json({ error: 'Failed to create device', message: (err as Error).message });
@@ -66,6 +72,11 @@ router.put('/:id', authenticate, authorize('Admin', 'IT Manager', 'IT Support'),
     const prev = await prisma.device.findUnique({ where: { id } });
     const device = await prisma.device.update({ where: { id }, data: req.body, include: { category: true } });
     await prisma.auditLog.create({ data: { userId: req.userId!, action: 'UPDATE', entityType: 'Device', entityId: device.id, previousValue: prev ? { status: prev.status, deviceName: prev.deviceName } as any : undefined, newValue: { status: device.status, deviceName: device.deviceName } as any, ipAddressSource: getClientIP(req) } });
+
+    // Notify monitor of device change (IP or status may have changed)
+    const monitor = getMonitorService();
+    if (monitor) monitor.onDeviceChanged(device.id);
+
     res.json(device);
   } catch {
     res.status(400).json({ error: 'Failed to update device' });
@@ -77,6 +88,11 @@ router.delete('/:id', authenticate, authorize('Admin', 'IT Manager'), async (req
     const id = getParam(req, 'id');
     await prisma.device.delete({ where: { id } });
     await prisma.auditLog.create({ data: { userId: req.userId!, action: 'DELETE', entityType: 'Device', entityId: id, ipAddressSource: getClientIP(req) } });
+
+    // Notify monitor of device deletion
+    const monitor = getMonitorService();
+    if (monitor) monitor.onDeviceDeleted(id);
+
     res.json({ message: 'Device deleted' });
   } catch {
     res.status(400).json({ error: 'Failed to delete device' });

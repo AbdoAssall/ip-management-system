@@ -230,3 +230,43 @@ export interface SavedFilter {
   filters: Partial<FilterState>;
   createdAt: string;
 }
+
+// ── WebSocket / Real-Time Monitoring ──
+
+export interface DevicePingStatus {
+  deviceId: string;
+  deviceName: string;
+  categoryName: string;
+  ipAddress: string;
+  isReachable: boolean;
+  lastChecked: string;
+  lastSeenOnline: string | null;
+  responseTimeMs: number | null;
+  consecutiveFailures: number;
+  status: DeviceStatus;
+  isCritical: boolean;
+  monitoringExcluded: boolean;
+}
+
+export interface DeviceStatusEvent {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  previousStatus: DeviceStatus;
+  newStatus: DeviceStatus;
+  isReachable: boolean;
+  responseTimeMs: number | null;
+  consecutiveFailures: number;
+  timestamp: string;
+  category?: string;
+  isCritical?: boolean;
+}
+
+export interface MonitorConfig {
+  pingIntervalMs: number;
+  criticalIntervalMs: number;
+  pingTimeoutS: number;
+  pingRetries: number;
+  enabled: boolean;
+}
+

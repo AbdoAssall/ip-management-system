@@ -78,6 +78,13 @@ model Device {
   backupStatus      String?   @default("N/A") @map("backup_status")
   monitoringEnabled Boolean   @default(false) @map("monitoring_enabled")
 
+  // Ping Monitoring
+  lastPingAt         DateTime? @map("last_ping_at")
+  lastSeenOnline     DateTime? @map("last_seen_online")
+  pingResponseMs     Int?      @map("ping_response_ms")
+  isReachable        Boolean   @default(true) @map("is_reachable")
+  monitoringExcluded Boolean   @default(false) @map("monitoring_excluded")
+
   createdBy String?  @map("created_by")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
