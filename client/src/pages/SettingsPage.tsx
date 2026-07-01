@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
@@ -62,7 +63,7 @@ export default function SettingsPage() {
                   { key: 'light' as const, label: 'Light', icon: Sun, desc: 'Bright and clean' },
                   { key: 'dark' as const, label: 'Dark', icon: Moon, desc: 'Easy on the eyes' },
                 ].map((t) => (
-                  <button key={t.key} onClick={() => setTheme(t.key)} style={{
+                  <button key={t.key} onClick={() => { setTheme(t.key); toast.success(`Theme changed to ${t.label}`); }} style={{
                     flex: 1, padding: '20px', borderRadius: 12, cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s',
                     border: theme === t.key ? '2px solid var(--accent-primary)' : '1px solid var(--border-primary)',
                     background: theme === t.key ? 'rgba(0,135,147,0.06)' : 'var(--bg-tertiary)',
@@ -117,7 +118,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => updateMonitorConfig({ enabled: !monitorConfig?.enabled })}
+                  onClick={() => { updateMonitorConfig({ enabled: !monitorConfig?.enabled }); toast.info(monitorConfig?.enabled ? 'Monitoring disabled' : 'Monitoring enabled'); }}
                   style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: monitorConfig?.enabled ? '#EF4444' : '#10B981', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}
                 >
                   {monitorConfig?.enabled ? 'Disable' : 'Enable'}
@@ -186,7 +187,7 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setSoundEnabled(!soundEnabled)}
+                    onClick={() => { setSoundEnabled(!soundEnabled); toast.info(soundEnabled ? 'Sound alerts disabled' : 'Sound alerts enabled'); }}
                     style={{
                       width: 48, height: 26, borderRadius: 13, border: 'none', cursor: 'pointer', position: 'relative', transition: 'all 0.3s',
                       background: soundEnabled ? '#10B981' : 'var(--border-primary)',
@@ -215,7 +216,7 @@ export default function SettingsPage() {
                       <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>{b.name}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{b.address}, {b.city}</div>
                     </div>
-                    <button onClick={() => setBranches((p) => p.filter((x) => x.id !== b.id))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><Trash2 size={15} /></button>
+                    <button onClick={() => { setBranches((p) => p.filter((x) => x.id !== b.id)); toast.success('Branch deleted'); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><Trash2 size={15} /></button>
                   </div>
                 ))}
               </div>
@@ -237,7 +238,7 @@ export default function SettingsPage() {
                         <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>{d.name}</div>
                         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{br?.name || '—'}</div>
                       </div>
-                      <button onClick={() => setDepartments((p) => p.filter((x) => x.id !== d.id))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><Trash2 size={15} /></button>
+                      <button onClick={() => { setDepartments((p) => p.filter((x) => x.id !== d.id)); toast.success('Department deleted'); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><Trash2 size={15} /></button>
                     </div>
                   );
                 })}
@@ -261,7 +262,7 @@ export default function SettingsPage() {
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{v.subnet} • GW: {v.gateway}</div>
                       </div>
                     </div>
-                    <button onClick={() => setVlans((p) => p.filter((x) => x.id !== v.id))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><Trash2 size={15} /></button>
+                    <button onClick={() => { setVlans((p) => p.filter((x) => x.id !== v.id)); toast.success('VLAN deleted'); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><Trash2 size={15} /></button>
                   </div>
                 ))}
               </div>
@@ -282,7 +283,7 @@ export default function SettingsPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
               <button onClick={() => setShowForm(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={() => { setBranches((p) => [...p, { id: generateId(), name: branchForm.name || '', address: branchForm.address || '', city: branchForm.city || '' }]); setShowForm(null); }} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Add</button>
+              <button onClick={() => { setBranches((p) => [...p, { id: generateId(), name: branchForm.name || '', address: branchForm.address || '', city: branchForm.city || '' }]); setShowForm(null); toast.success('Branch added successfully'); }} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Add</button>
             </div>
           </div>
         </div>
@@ -299,7 +300,7 @@ export default function SettingsPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
               <button onClick={() => setShowForm(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={() => { setDepartments((p) => [...p, { id: generateId(), name: deptForm.name || '', branchId: deptForm.branchId || 'br-01' }]); setShowForm(null); }} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Add</button>
+              <button onClick={() => { setDepartments((p) => [...p, { id: generateId(), name: deptForm.name || '', branchId: deptForm.branchId || 'br-01' }]); setShowForm(null); toast.success('Department added successfully'); }} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Add</button>
             </div>
           </div>
         </div>
@@ -319,7 +320,7 @@ export default function SettingsPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
               <button onClick={() => setShowForm(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={() => { setVlans((p) => [...p, { id: generateId(), vlanNumber: vlanForm.vlanNumber || 0, name: vlanForm.name || '', subnet: vlanForm.subnet || '', gateway: vlanForm.gateway || '', description: vlanForm.description || '' }]); setShowForm(null); }} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Add</button>
+              <button onClick={() => { setVlans((p) => [...p, { id: generateId(), vlanNumber: vlanForm.vlanNumber || 0, name: vlanForm.name || '', subnet: vlanForm.subnet || '', gateway: vlanForm.gateway || '', description: vlanForm.description || '' }]); setShowForm(null); toast.success('VLAN added successfully'); }} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Add</button>
             </div>
           </div>
         </div>

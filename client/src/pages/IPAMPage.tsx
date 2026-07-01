@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { toast } from "sonner";
 import { mockData } from "@/lib/mockData";
 import { DEFAULT_VLANS, DEVICE_CATEGORIES } from "@/lib/constants";
 import { generateId } from "@/lib/utils";
@@ -14,6 +15,8 @@ import {
   Edit2,
   Trash2,
   Wifi,
+  ArrowLeft,
+  Save,
 } from "lucide-react";
 
 const inputStyle: React.CSSProperties = {
@@ -34,6 +37,13 @@ const labelStyle: React.CSSProperties = {
   color: "var(--text-secondary)",
   marginBottom: 6,
 };
+const selectStyle: React.CSSProperties = {
+  ...inputStyle,
+  appearance: "none" as const,
+  cursor: "pointer",
+};
+
+type Mode = "list" | "add" | "edit";
 
 export default function IPAMPage() {
   const [ips, setIps] = useState<IPAddress[]>(mockData.ipAddresses);
@@ -42,11 +52,44 @@ export default function IPAMPage() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterVlan, setFilterVlan] = useState("");
-  const [showIPForm, setShowIPForm] = useState(false);
   const [checkIP, setCheckIP] = useState("");
   const [checkResult, setCheckResult] = useState<string | null>(null);
   const [showVlanForm, setShowVlanForm] = useState(false);
   const [vlanForm, setVlanForm] = useState<Partial<VLAN>>({});
+
+  // ── Full-page IP form state (like DevicesPage) ──
+  const [mode, setMode] = useState<Mode>("list");
+  const [activeIP, setActiveIP] = useState<IPAddress | null>(null);
+  const emptyIPForm = {
+    ipAddress: "",
+    vlanId: "vlan-01",
+    status: "Available" as IPAddress["status"],
+    type: "IPv4" as IPAddress["type"],
+    notes: "",
+  };
+  const [ipForm, setIPForm] = useState(emptyIPForm);
+
+  const goList = () => {
+    setMode("list");
+    setActiveIP(null);
+    setIPForm(emptyIPForm);
+  };
+  const goAdd = () => {
+    setActiveIP(null);
+    setIPForm(emptyIPForm);
+    setMode("add");
+  };
+  const goEdit = (ip: IPAddress) => {
+    setActiveIP(ip);
+    setIPForm({
+      ipAddress: ip.ipAddress,
+      vlanId: ip.vlanId,
+      status: ip.status,
+      type: ip.type,
+      notes: ip.notes,
+    });
+    setMode("edit");
+  };
 
   const ipStats = useMemo(
     () => ({
@@ -82,38 +125,43 @@ export default function IPAMPage() {
     });
   }, [ips, search, filterStatus, filterVlan]);
 
-  const [ipForm, setIPForm] = useState({
-    ipAddress: "",
-    vlanId: "vlan-01",
-    status: "Available" as const,
-    notes: "",
-  });
-
-  const addIP = () => {
-    const existing = ips.find((i) => i.ipAddress === ipForm.ipAddress);
-    const newIP: IPAddress = {
-      id: generateId(),
-      ipAddress: ipForm.ipAddress,
-      deviceId: null,
-      vlanId: ipForm.vlanId,
-      status: existing ? "Duplicate" : (ipForm.status as IPAddress["status"]),
-      type: "IPv4",
-      notes: ipForm.notes,
-      assignedAt: null,
-    };
-    setIps((prev) => [...prev, newIP]);
-    setShowIPForm(false);
-    setIPForm({
-      ipAddress: "",
-      vlanId: "vlan-01",
-      status: "Available",
-      notes: "",
-    });
+  const saveIP = () => {
+    if (mode === "edit" && activeIP) {
+      setIps((prev) =>
+        prev.map((ip) =>
+          ip.id === activeIP.id
+            ? { ...ip, ipAddress: ipForm.ipAddress, vlanId: ipForm.vlanId, status: ipForm.status, type: ipForm.type, notes: ipForm.notes }
+            : ip,
+        ),
+      );
+      toast.success("IP address updated successfully");
+    } else {
+      const existing = ips.find((i) => i.ipAddress === ipForm.ipAddress);
+      const newIP: IPAddress = {
+        id: generateId(),
+        ipAddress: ipForm.ipAddress,
+        deviceId: null,
+        vlanId: ipForm.vlanId,
+        status: existing ? "Duplicate" : ipForm.status,
+        type: ipForm.type,
+        notes: ipForm.notes,
+        assignedAt: null,
+      };
+      setIps((prev) => [...prev, newIP]);
+      if (existing) {
+        toast.warning("IP address added as Duplicate — this address already exists");
+      } else {
+        toast.success("IP address added successfully");
+      }
+    }
+    goList();
   };
 
   const deleteIP = (id: string) => {
-    if (confirm("Delete this IP?"))
+    if (confirm("Delete this IP?")) {
       setIps((prev) => prev.filter((i) => i.id !== id));
+      toast.success("IP address deleted");
+    }
   };
 
   const checkAvailability = () => {
@@ -137,11 +185,14 @@ export default function IPAMPage() {
     setVlans((prev) => [...prev, v]);
     setShowVlanForm(false);
     setVlanForm({});
+    toast.success("VLAN added successfully");
   };
 
   const deleteVlan = (id: string) => {
-    if (confirm("Delete this VLAN?"))
+    if (confirm("Delete this VLAN?")) {
       setVlans((prev) => prev.filter((v) => v.id !== id));
+      toast.success("VLAN deleted");
+    }
   };
 
   // Generate range view for selected VLAN
@@ -170,6 +221,197 @@ export default function IPAMPage() {
     Duplicate: "#EF4444",
   };
 
+  // ── FULL-PAGE ADD / EDIT FORM ──
+  if (mode !== "list") {
+    const title = mode === "edit" ? `Edit IP Address: ${activeIP?.ipAddress}` : "Add New IP Address";
+
+    return (
+      <div className="animate-fade-in">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <button
+              onClick={goList}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                border: "1px solid var(--border-primary)",
+                background: "var(--bg-card)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--text-secondary)",
+              }}
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div>
+              <h2
+                style={{
+                  fontSize: 22,
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                  fontFamily: "var(--font-heading)",
+                }}
+              >
+                {title}
+              </h2>
+              <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>
+                {mode === "edit" ? "Update the IP address details below" : "Fill in the details for the new IP address"}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={saveIP}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "10px 20px",
+              borderRadius: 10,
+              border: "none",
+              background: "linear-gradient(135deg, #008793, #004D7A)",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <Save size={14} /> {mode === "edit" ? "Update" : "Save IP Address"}
+          </button>
+        </div>
+
+        {/* Form Card */}
+        <div
+          style={{
+            background: "var(--bg-card)",
+            borderRadius: 14,
+            border: "1px solid var(--border-primary)",
+            padding: "28px 32px",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div>
+              <label style={labelStyle}>IP Address *</label>
+              <input
+                value={ipForm.ipAddress}
+                onChange={(e) =>
+                  setIPForm((p) => ({ ...p, ipAddress: e.target.value }))
+                }
+                style={inputStyle}
+                placeholder="e.g. 10.10.30.20"
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>VLAN</label>
+              <select
+                value={ipForm.vlanId}
+                onChange={(e) =>
+                  setIPForm((p) => ({ ...p, vlanId: e.target.value }))
+                }
+                style={selectStyle}
+              >
+                {vlans.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    VLAN {v.vlanNumber} - {v.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Status</label>
+              <select
+                value={ipForm.status}
+                onChange={(e) =>
+                  setIPForm((p) => ({
+                    ...p,
+                    status: e.target.value as IPAddress["status"],
+                  }))
+                }
+                style={selectStyle}
+              >
+                <option value="Available">Available</option>
+                <option value="Assigned">Assigned</option>
+                <option value="Reserved">Reserved</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Type</label>
+              <select
+                value={ipForm.type}
+                onChange={(e) =>
+                  setIPForm((p) => ({
+                    ...p,
+                    type: e.target.value as IPAddress["type"],
+                  }))
+                }
+                style={selectStyle}
+              >
+                <option value="IPv4">IPv4</option>
+                <option value="IPv6">IPv6</option>
+              </select>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={labelStyle}>Notes</label>
+              <textarea
+                value={ipForm.notes}
+                onChange={(e) =>
+                  setIPForm((p) => ({ ...p, notes: e.target.value }))
+                }
+                rows={3}
+                style={{ ...inputStyle, resize: "vertical" }}
+                placeholder="Optional notes about this IP address..."
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Actions */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+            marginTop: 16,
+          }}
+        >
+          <button
+            onClick={goList}
+            style={{
+              padding: "10px 20px",
+              borderRadius: 8,
+              border: "1px solid var(--border-primary)",
+              background: "transparent",
+              color: "var(--text-secondary)",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={saveIP}
+            style={{
+              padding: "10px 20px",
+              borderRadius: 8,
+              border: "none",
+              background: "linear-gradient(135deg, #008793, #004D7A)",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {mode === "edit" ? "Update IP Address" : "Add IP Address"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── LIST VIEW ──
   return (
     <div className="animate-fade-in">
       <div
@@ -197,7 +439,7 @@ export default function IPAMPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={() => setShowIPForm(true)}
+            onClick={goAdd}
             style={{
               display: "flex",
               alignItems: "center",
@@ -210,6 +452,8 @@ export default function IPAMPage() {
               fontSize: 13,
               fontWeight: 600,
               cursor: "pointer",
+              fontFamily: "var(--font-heading)",
+              boxShadow: "0 4px 12px rgba(0,135,147,0.25)",
             }}
           >
             <Plus size={16} /> Add IP
@@ -563,23 +807,42 @@ export default function IPAMPage() {
                         {ip.notes || "—"}
                       </td>
                       <td style={{ padding: "10px 16px" }}>
-                        <button
-                          onClick={() => deleteIP(ip.id)}
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 6,
-                            border: "none",
-                            background: "var(--bg-tertiary)",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "#EF4444",
-                          }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button
+                            onClick={() => goEdit(ip)}
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 6,
+                              border: "none",
+                              background: "var(--bg-tertiary)",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "#3B82F6",
+                            }}
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => deleteIP(ip.id)}
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 6,
+                              border: "none",
+                              background: "var(--bg-tertiary)",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "#EF4444",
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -841,157 +1104,6 @@ export default function IPAMPage() {
                   {ip.addr.split(".").pop()}
                 </div>
               ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add IP Modal */}
-      {showIPForm && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            zIndex: 100,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-          onClick={() => setShowIPForm(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="animate-scale-in"
-            style={{
-              background: "var(--bg-secondary)",
-              borderRadius: 16,
-              width: 420,
-              padding: 28,
-              border: "1px solid var(--border-primary)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginBottom: 20,
-              }}
-            >
-              <h3
-                style={{
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: "var(--text-primary)",
-                  fontFamily: "var(--font-heading)",
-                }}
-              >
-                Add IP Address
-              </h3>
-              <button
-                onClick={() => setShowIPForm(false)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-muted)",
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <label style={labelStyle}>IP Address</label>
-                <input
-                  value={ipForm.ipAddress}
-                  onChange={(e) =>
-                    setIPForm((p) => ({ ...p, ipAddress: e.target.value }))
-                  }
-                  style={inputStyle}
-                  placeholder="10.10.x.x"
-                />
-              </div>
-              <div>
-                <label style={labelStyle}>VLAN</label>
-                <select
-                  value={ipForm.vlanId}
-                  onChange={(e) =>
-                    setIPForm((p) => ({ ...p, vlanId: e.target.value }))
-                  }
-                  style={{ ...inputStyle, appearance: "none" as const }}
-                >
-                  {vlans.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      VLAN {v.vlanNumber} - {v.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Status</label>
-                <select
-                  value={ipForm.status}
-                  onChange={(e) =>
-                    setIPForm((p) => ({
-                      ...p,
-                      status: e.target.value as "Available",
-                    }))
-                  }
-                  style={{ ...inputStyle, appearance: "none" as const }}
-                >
-                  <option value="Available">Available</option>
-                  <option value="Reserved">Reserved</option>
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Notes</label>
-                <input
-                  value={ipForm.notes}
-                  onChange={(e) =>
-                    setIPForm((p) => ({ ...p, notes: e.target.value }))
-                  }
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 10,
-                marginTop: 20,
-              }}
-            >
-              <button
-                onClick={() => setShowIPForm(false)}
-                style={{
-                  padding: "10px 20px",
-                  borderRadius: 8,
-                  border: "1px solid var(--border-primary)",
-                  background: "transparent",
-                  color: "var(--text-secondary)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={addIP}
-                style={{
-                  padding: "10px 20px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: "var(--accent-primary)",
-                  color: "#fff",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Add
-              </button>
             </div>
           </div>
         </div>

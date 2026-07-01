@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { toast } from 'sonner';
 import { mockData } from '@/lib/mockData';
 import { DEVICE_CATEGORIES, STATUS_OPTIONS, DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS, DEVICE_BRANDS, SECURITY_LEVELS, BACKUP_STATUSES, DEFAULT_VLANS } from '@/lib/constants';
 import { formatDate, formatDateTime, generateId } from '@/lib/utils';
@@ -48,12 +49,14 @@ export default function DevicesPage() {
   const save = () => {
     if (mode === 'edit' && activeDevice) {
       setDevices(prev => prev.map(d => d.id === activeDevice.id ? { ...d, ...form, category: DEVICE_CATEGORIES.find(c => c.id === form.categoryId), updatedAt: new Date().toISOString() } : d));
+      toast.success('Device updated successfully');
     } else {
       setDevices(prev => [...prev, { ...form, id: generateId(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: 'usr-01', category: DEVICE_CATEGORIES.find(c => c.id === form.categoryId) } as Device]);
+      toast.success('Device added successfully');
     }
     goList();
   };
-  const del = (id: string) => { if (confirm('Delete this device?')) setDevices(prev => prev.filter(d => d.id !== id)); };
+  const del = (id: string) => { if (confirm('Delete this device?')) { setDevices(prev => prev.filter(d => d.id !== id)); toast.success('Device deleted'); } };
 
   const tabs = [
     { l: 'General', i: Monitor },

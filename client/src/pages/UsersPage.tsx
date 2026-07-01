@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { mockData } from '@/lib/mockData';
 import { ROLES } from '@/lib/constants';
 import { formatDateTime, getInitials, generateId } from '@/lib/utils';
@@ -27,14 +28,20 @@ export default function UsersPage() {
     const role = ROLES.find((r) => r.id === form.roleId)!;
     if (editUser) {
       setUsers((prev) => prev.map((u) => u.id === editUser.id ? { ...u, ...form, role } : u));
+      toast.success('User updated successfully');
     } else {
       setUsers((prev) => [...prev, { id: generateId(), ...form, role, isActive: true, lastLogin: null, createdAt: new Date().toISOString() }]);
+      toast.success('User added successfully');
     }
     setShowForm(false);
   };
 
-  const toggleActive = (id: string) => setUsers((prev) => prev.map((u) => u.id === id ? { ...u, isActive: !u.isActive } : u));
-  const deleteUser = (id: string) => { if (confirm('Delete user?')) setUsers((prev) => prev.filter((u) => u.id !== id)); };
+  const toggleActive = (id: string) => {
+    setUsers((prev) => prev.map((u) => u.id === id ? { ...u, isActive: !u.isActive } : u));
+    const user = users.find((u) => u.id === id);
+    toast.info(user?.isActive ? 'User deactivated' : 'User activated');
+  };
+  const deleteUser = (id: string) => { if (confirm('Delete user?')) { setUsers((prev) => prev.filter((u) => u.id !== id)); toast.success('User deleted'); } };
 
   return (
     <div className="animate-fade-in">
