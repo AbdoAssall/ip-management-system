@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { mockData } from '@/lib/mockData';
 import { DEVICE_CATEGORIES, STATUS_OPTIONS, DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS, DEVICE_BRANDS, SECURITY_LEVELS, BACKUP_STATUSES, DEFAULT_VLANS } from '@/lib/constants';
 import { formatDate, formatDateTime, generateId } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import type { Device } from '@/types';
 import { Plus, Search, Edit2, Trash2, Eye, ArrowLeft, Monitor, Server, Router, Network, Layers, Laptop, Fingerprint, Camera, Shield, Phone, Wifi, HardDrive, Globe, Save, UserCircle, Activity, RefreshCw } from 'lucide-react';
@@ -12,11 +13,15 @@ const IS: React.CSSProperties = { width: '100%', padding: '10px 14px', borderRad
 const LS: React.CSSProperties = { display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 };
 const SS: React.CSSProperties = { ...IS, appearance: 'none' as const, cursor: 'pointer' };
 
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001');
+
 type Mode = 'list' | 'view' | 'edit' | 'add';
 
 export default function DevicesPage() {
-  const { getDeviceStatus, requestPing, isConnected } = useWebSocket();
-  const [devices, setDevices] = useState<Device[]>(mockData.devices);
+  const { token } = useAuth();
+  const { getDeviceStatus, requestPing, isConnected, deviceStatuses } = useWebSocket();
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -24,6 +29,42 @@ export default function DevicesPage() {
   const [mode, setMode] = useState<Mode>('list');
   const [activeDevice, setActiveDevice] = useState<Device | null>(null);
   const [formTab, setFormTab] = useState(0);
+
+  // Fetch devices from API
+  const fetchDevices = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/devices?limit=500`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const normalized: Device[] = (data.devices || []).map((d: any) => ({
+          ...d,
+          ipAddress: d.ipAddresses?.[0]?.ipAddress || d.ipAddress || '',
+          purchaseDate: d.purchaseDate || '',
+          warrantyExpiration: d.warrantyExpiration || '',
+          notes: d.notes || '',
+          lastMaintenance: d.lastMaintenance || '',
+        }));
+        setDevices(normalized);
+      }
+    } catch (err) {
+      console.warn('DevicesPage: API fetch failed, falling back to mock data', err);
+      setDevices(mockData.devices);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchDevices();
+  }, [fetchDevices]);
+
+  // Refresh when WebSocket reconnects
+  useEffect(() => {
+    if (isConnected) fetchDevices();
+  }, [isConnected, fetchDevices]);
 
   const empty: Omit<Device, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> = {
     deviceName: '', assetTag: '', categoryId: 'cat-01', brand: '', model: '', serialNumber: '', hostname: '',
@@ -35,28 +76,83 @@ export default function DevicesPage() {
   const [form, setForm] = useState(empty);
   const sf = (k: string, v: unknown) => setForm(p => ({ ...p, [k]: v }));
 
-  const filtered = useMemo(() => devices.filter(d => {
+  // Merge WebSocket live status into device list
+  const liveDevices = useMemo(() => {
+    if (deviceStatuses.size === 0) return devices;
+    return devices.map(d => {
+      const ws = deviceStatuses.get(d.id);
+      if (ws) {
+        return { ...d, status: ws.status as Device['status'] };
+      }
+      return d;
+    });
+  }, [devices, deviceStatuses]);
+
+  const filtered = useMemo(() => liveDevices.filter(d => {
     const q = search.toLowerCase();
     return (!q || d.deviceName.toLowerCase().includes(q) || d.ipAddress.includes(q) || d.assetTag.toLowerCase().includes(q) || d.hostname.toLowerCase().includes(q))
       && (!filterCat || d.categoryId === filterCat) && (!filterStatus || d.status === filterStatus) && (!filterBranch || d.branchId === filterBranch);
-  }), [devices, search, filterCat, filterStatus, filterBranch]);
+  }), [liveDevices, search, filterCat, filterStatus, filterBranch]);
 
   const goView = (d: Device) => { setActiveDevice(d); setFormTab(0); setMode('view'); };
   const goEdit = (d: Device) => { setActiveDevice(d); const { id, createdAt, updatedAt, createdBy, category, location, department, branch, employee, ...rest } = d; setForm(rest as typeof empty); setFormTab(0); setMode('edit'); };
   const goAdd = () => { setActiveDevice(null); setForm(empty); setFormTab(0); setMode('add'); };
   const goList = () => { setMode('list'); setActiveDevice(null); setFormTab(0); };
 
-  const save = () => {
-    if (mode === 'edit' && activeDevice) {
-      setDevices(prev => prev.map(d => d.id === activeDevice.id ? { ...d, ...form, category: DEVICE_CATEGORIES.find(c => c.id === form.categoryId), updatedAt: new Date().toISOString() } : d));
-      toast.success('Device updated successfully');
-    } else {
-      setDevices(prev => [...prev, { ...form, id: generateId(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: 'usr-01', category: DEVICE_CATEGORIES.find(c => c.id === form.categoryId) } as Device]);
-      toast.success('Device added successfully');
+  const save = async () => {
+    if (!token) return;
+    try {
+      if (mode === 'edit' && activeDevice) {
+        const res = await fetch(`${API_URL}/api/devices/${activeDevice.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(form),
+        });
+        if (res.ok) {
+          toast.success('Device updated successfully');
+          await fetchDevices();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast.error(err.error || 'Failed to update device');
+        }
+      } else {
+        const res = await fetch(`${API_URL}/api/devices`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(form),
+        });
+        if (res.ok) {
+          toast.success('Device added successfully');
+          await fetchDevices();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast.error(err.error || 'Failed to add device');
+        }
+      }
+    } catch (err) {
+      toast.error('Network error');
     }
     goList();
   };
-  const del = (id: string) => { if (confirm('Delete this device?')) { setDevices(prev => prev.filter(d => d.id !== id)); toast.success('Device deleted'); } };
+
+  const del = async (id: string) => {
+    if (!confirm('Delete this device?')) return;
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/devices/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success('Device deleted');
+        await fetchDevices();
+      } else {
+        toast.error('Failed to delete device');
+      }
+    } catch {
+      toast.error('Network error');
+    }
+  };
 
   const tabs = [
     { l: 'General', i: Monitor },

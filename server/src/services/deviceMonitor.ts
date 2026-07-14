@@ -21,6 +21,7 @@ export interface DevicePingEntry {
   status: string;
   isCritical: boolean;
   monitoringExcluded: boolean;
+  securityLevel: string;
 }
 
 export interface MonitorConfig {
@@ -161,6 +162,7 @@ export class DeviceMonitorService {
           status: device.status,
           isCritical,
           monitoringExcluded: device.monitoringExcluded,
+          securityLevel: device.securityLevel || 'Medium',
         });
       }
 
@@ -320,6 +322,7 @@ export class DeviceMonitorService {
         timestamp: now.toISOString(),
         category: entry.categoryName,
         isCritical: entry.isCritical,
+        securityLevel: entry.securityLevel,
       };
 
       this.io.emit('device:status-update', event);
@@ -384,10 +387,11 @@ export class DeviceMonitorService {
       });
 
       // Also push via WebSocket for instant delivery
+      const isHighPriority = isCriticalDevice || entry.securityLevel === 'High' || entry.securityLevel === 'Critical';
       this.io.emit('notification:new', {
         ...notification,
         createdAt: notification.createdAt.toISOString(),
-        playSound: isDown && isCriticalDevice, // Sound for critical alerts
+        playSound: isHighPriority, // Sound for critical/high device alerts (both down and recovery)
       });
     } catch (err) {
       console.error(`📡 Notification failed for ${entry.deviceName}:`, err);

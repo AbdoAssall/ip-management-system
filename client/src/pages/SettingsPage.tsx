@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS, DEFAULT_VLANS } from '@/lib/constants';
-import { Sun, Moon, Monitor, MapPin, Building2, Layers, Plus, Trash2, X, Settings as SettingsIcon, Activity, Volume2, VolumeX, Power, PowerOff } from 'lucide-react';
+import { Sun, Moon, Monitor, MapPin, Building2, Layers, Plus, Trash2, X, Settings as SettingsIcon, Activity, Volume2, VolumeX, Power, PowerOff, Save } from 'lucide-react';
 import type { Branch, Department, VLAN } from '@/types';
 import { generateId } from '@/lib/utils';
 
@@ -23,6 +23,39 @@ export default function SettingsPage() {
   const [branchForm, setBranchForm] = useState<Partial<Branch>>({});
   const [deptForm, setDeptForm] = useState<Partial<Department>>({});
   const [vlanForm, setVlanForm] = useState<Partial<VLAN>>({});
+
+  // Local state for monitoring config — edit locally, apply on blur/button
+  const [localConfig, setLocalConfig] = useState({
+    pingIntervalMs: 30000,
+    criticalIntervalMs: 10000,
+    pingTimeoutS: 2,
+    pingRetries: 2,
+  });
+  const [configDirty, setConfigDirty] = useState(false);
+
+  // Sync local config from server
+  useEffect(() => {
+    if (monitorConfig) {
+      setLocalConfig({
+        pingIntervalMs: monitorConfig.pingIntervalMs,
+        criticalIntervalMs: monitorConfig.criticalIntervalMs,
+        pingTimeoutS: monitorConfig.pingTimeoutS,
+        pingRetries: monitorConfig.pingRetries,
+      });
+      setConfigDirty(false);
+    }
+  }, [monitorConfig]);
+
+  const setLocalField = useCallback((field: string, value: number) => {
+    setLocalConfig(prev => ({ ...prev, [field]: value }));
+    setConfigDirty(true);
+  }, []);
+
+  const applyConfig = useCallback(() => {
+    updateMonitorConfig(localConfig);
+    setConfigDirty(false);
+    toast.success('Monitoring config applied');
+  }, [localConfig, updateMonitorConfig]);
 
   const tabs = [
     { key: 'appearance' as const, label: 'Appearance', icon: Sun },
@@ -127,14 +160,25 @@ export default function SettingsPage() {
 
               {/* Timing Config */}
               <div style={{ marginBottom: 20 }}>
-                <h4 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12, fontFamily: 'var(--font-heading)' }}>Ping Intervals</h4>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-heading)' }}>Ping Intervals</h4>
+                  {configDirty && (
+                    <button
+                      onClick={applyConfig}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 16px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg, #008793, #004D7A)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,135,147,0.3)', transition: 'all 0.2s' }}
+                    >
+                      <Save size={13} /> Apply Changes
+                    </button>
+                  )}
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div>
                     <label style={labelStyle}>Normal Devices Interval (ms)</label>
                     <input
                       type="number"
-                      value={monitorConfig?.pingIntervalMs || 30000}
-                      onChange={(e) => updateMonitorConfig({ pingIntervalMs: Number(e.target.value) })}
+                      value={localConfig.pingIntervalMs}
+                      onChange={(e) => setLocalField('pingIntervalMs', Number(e.target.value))}
+                      onBlur={configDirty ? applyConfig : undefined}
                       style={inputStyle}
                       min={5000} step={1000}
                     />
@@ -144,8 +188,9 @@ export default function SettingsPage() {
                     <label style={labelStyle}>Critical Devices Interval (ms)</label>
                     <input
                       type="number"
-                      value={monitorConfig?.criticalIntervalMs || 10000}
-                      onChange={(e) => updateMonitorConfig({ criticalIntervalMs: Number(e.target.value) })}
+                      value={localConfig.criticalIntervalMs}
+                      onChange={(e) => setLocalField('criticalIntervalMs', Number(e.target.value))}
+                      onBlur={configDirty ? applyConfig : undefined}
                       style={inputStyle}
                       min={3000} step={1000}
                     />
@@ -155,8 +200,9 @@ export default function SettingsPage() {
                     <label style={labelStyle}>Ping Timeout (seconds)</label>
                     <input
                       type="number"
-                      value={monitorConfig?.pingTimeoutS || 2}
-                      onChange={(e) => updateMonitorConfig({ pingTimeoutS: Number(e.target.value) })}
+                      value={localConfig.pingTimeoutS}
+                      onChange={(e) => setLocalField('pingTimeoutS', Number(e.target.value))}
+                      onBlur={configDirty ? applyConfig : undefined}
                       style={inputStyle}
                       min={1} max={10}
                     />
@@ -166,8 +212,9 @@ export default function SettingsPage() {
                     <label style={labelStyle}>Retries Before Offline</label>
                     <input
                       type="number"
-                      value={monitorConfig?.pingRetries || 2}
-                      onChange={(e) => updateMonitorConfig({ pingRetries: Number(e.target.value) })}
+                      value={localConfig.pingRetries}
+                      onChange={(e) => setLocalField('pingRetries', Number(e.target.value))}
+                      onBlur={configDirty ? applyConfig : undefined}
                       style={inputStyle}
                       min={0} max={10}
                     />
@@ -183,7 +230,7 @@ export default function SettingsPage() {
                     {soundEnabled ? <Volume2 size={20} color="var(--accent-primary)" /> : <VolumeX size={20} color="var(--text-muted)" />}
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Sound Alerts</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Play audio alarm when critical devices go offline</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Play alarm when critical/high devices go offline, and chime when they recover</div>
                     </div>
                   </div>
                   <button

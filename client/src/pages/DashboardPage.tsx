@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { mockData } from "@/lib/mockData";
 import {
   DEVICE_CATEGORIES,
@@ -53,35 +53,85 @@ const iconMap: Record<string, React.ElementType> = {
   Wifi,
 };
 
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001');
+
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { isConnected, deviceStatuses, statusEvents } = useWebSocket();
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [detailTab, setDetailTab] = useState(0);
 
-  // Use live WebSocket data for online/offline counts, fallback to mock
-  const liveStats = useMemo(() => {
-    if (deviceStatuses.size > 0) {
-      let online = 0, offline = 0, maintenance = 0;
-      deviceStatuses.forEach((s) => {
-        if (s.status === 'Online') online++;
-        else if (s.status === 'Offline') offline++;
-        else if (s.status === 'Maintenance') maintenance++;
-      });
-      return { online, offline, maintenance, total: deviceStatuses.size };
+  // Real device data from API
+  const [apiDevices, setApiDevices] = useState<Device[]>([]);
+  const [apiStats, setApiStats] = useState<{ total: number; online: number; offline: number; maintenance: number; byCategory: { name: string; count: number; color: string }[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch devices from API
+  const fetchDevices = useCallback(async () => {
+    if (!token) return;
+    try {
+      const [devRes, statsRes] = await Promise.all([
+        fetch(`${API_URL}/api/devices?limit=200`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/devices/stats`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      if (devRes.ok) {
+        const devData = await devRes.json();
+        // Normalize API devices — flatten ipAddresses to ipAddress
+        const normalized: Device[] = (devData.devices || []).map((d: any) => ({
+          ...d,
+          ipAddress: d.ipAddresses?.[0]?.ipAddress || d.ipAddress || '',
+          purchaseDate: d.purchaseDate || '',
+          warrantyExpiration: d.warrantyExpiration || '',
+          notes: d.notes || '',
+          lastMaintenance: d.lastMaintenance || '',
+        }));
+        setApiDevices(normalized);
+      }
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setApiStats(statsData);
+      }
+    } catch (err) {
+      console.warn('Dashboard: API fetch failed, falling back to mock data', err);
+    } finally {
+      setLoading(false);
     }
-    return null;
-  }, [deviceStatuses]);
+  }, [token]);
+
+  useEffect(() => {
+    fetchDevices();
+    // Refresh device list every 60 seconds to pick up new devices
+    const interval = setInterval(fetchDevices, 60000);
+    return () => clearInterval(interval);
+  }, [fetchDevices]);
+
+  // Also refresh when WebSocket reconnects (new devices may have been added)
+  useEffect(() => {
+    if (isConnected) fetchDevices();
+  }, [isConnected, fetchDevices]);
+
+  // Use API data if available, otherwise fall back to mockData
+  const devices = apiDevices.length > 0 ? apiDevices : mockData.devices;
+
+  // Merge WebSocket live status into device data
+  const liveDevices = useMemo(() => {
+    if (deviceStatuses.size === 0) return devices;
+    return devices.map(d => {
+      const ws = deviceStatuses.get(d.id);
+      if (ws) {
+        return { ...d, status: ws.status as Device['status'] };
+      }
+      return d;
+    });
+  }, [devices, deviceStatuses]);
 
   const stats = useMemo(() => {
-    const devices = mockData.devices;
+    const devs = liveDevices;
     const ips = mockData.ipAddresses;
-    const online = liveStats?.online ?? devices.filter((d) => d.status === "Online").length;
-    const offline = liveStats?.offline ?? devices.filter((d) => d.status === "Offline").length;
-    const maintenance = liveStats?.maintenance ?? devices.filter(
-      (d) => d.status === "Maintenance",
-    ).length;
-    const total = liveStats?.total ?? devices.length;
+    const online = devs.filter((d) => d.status === "Online").length;
+    const offline = devs.filter((d) => d.status === "Offline").length;
+    const maintenance = devs.filter((d) => d.status === "Maintenance").length;
+    const total = devs.length;
     const assigned = ips.filter((ip) => ip.status === "Assigned").length;
     const available = ips.filter((ip) => ip.status === "Available").length;
     const seen = new Map<string, number>();
@@ -92,12 +142,15 @@ export default function DashboardPage() {
     seen.forEach((c) => {
       if (c > 1) dupCount++;
     });
-    const byCategory = DEVICE_CATEGORIES.map((cat) => ({
-      name: cat.name,
-      count: devices.filter((d) => d.categoryId === cat.id).length,
-      color: cat.color,
-      icon: cat.icon,
-    })).filter((c) => c.count > 0);
+    // Use API category stats if available, fallback to computing from devices
+    const byCategory = apiStats?.byCategory && apiStats.byCategory.length > 0
+      ? apiStats.byCategory.filter((c: any) => c.count > 0)
+      : DEVICE_CATEGORIES.map((cat) => ({
+          name: cat.name,
+          count: devs.filter((d) => d.categoryId === cat.id).length,
+          color: cat.color,
+          icon: cat.icon,
+        })).filter((c) => c.count > 0);
     const subnetUtil = DEFAULT_VLANS.map((v) => {
       const used = ips.filter(
         (ip) => ip.vlanId === v.id && ip.status !== "Available",
@@ -110,7 +163,8 @@ export default function DashboardPage() {
         pct: Math.round((used / 254) * 100),
       };
     });
-    const warrantyExpiring = devices.filter((d) => {
+    const warrantyExpiring = devs.filter((d) => {
+      if (!d.warrantyExpiration) return false;
       const diff =
         (new Date(d.warrantyExpiration).getTime() - Date.now()) / 86400000;
       return diff > 0 && diff < 90;
@@ -126,10 +180,10 @@ export default function DashboardPage() {
       duplicates: dupCount,
       byCategory,
       subnetUtil,
-      recent: devices.slice(-8).reverse(),
+      recent: devs.slice(0, 8),
       warrantyExpiring,
     };
-  }, [liveStats]);
+  }, [liveDevices, apiStats]);
 
   const recentActivity = useMemo(() => mockData.auditLogs.slice(0, 5), []);
   const greeting = useMemo(() => {

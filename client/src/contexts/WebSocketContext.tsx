@@ -50,6 +50,31 @@ function playAlertSound() {
   }
 }
 
+/** Pleasant ascending chime for critical/high device recovery */
+function playRecoverySound() {
+  try {
+    const ctx = new AudioContext();
+    const playTone = (freq: number, start: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.12, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration);
+    };
+    // Ascending three-note chime: C5 → E5 → G5
+    playTone(523, 0, 0.2);
+    playTone(659, 0.2, 0.2);
+    playTone(784, 0.4, 0.35);
+  } catch {
+    // Audio not available
+  }
+}
+
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -124,7 +149,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     });
 
     // Individual status update
-    s.on('device:status-update', (event: DeviceStatusEvent & { responseTimeMs?: number }) => {
+    s.on('device:status-update', (event: DeviceStatusEvent & { responseTimeMs?: number; securityLevel?: string }) => {
       // Update the status map
       setDeviceStatuses((prev) => {
         const next = new Map(prev);
@@ -149,6 +174,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           const next = [event, ...prev];
           return next.slice(0, MAX_EVENTS);
         });
+
+        // Play recovery sound for critical/high devices coming back online
+        const isRecovery = event.previousStatus === 'Offline' && event.newStatus === 'Online';
+        const isImportant = event.isCritical || event.securityLevel === 'High' || event.securityLevel === 'Critical';
+        if (isRecovery && isImportant && soundEnabled) {
+          playRecoverySound();
+        }
       }
     });
 
