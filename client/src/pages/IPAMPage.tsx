@@ -1,8 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { mockData } from "@/lib/mockData";
-import { DEFAULT_VLANS, DEVICE_CATEGORIES } from "@/lib/constants";
-import { generateId } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { DEFAULT_VLANS } from "@/lib/constants";
 import type { IPAddress, VLAN } from "@/types";
 import {
   Search,
@@ -43,19 +42,67 @@ const selectStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001');
+
 type Mode = "list" | "add" | "edit";
 
 export default function IPAMPage() {
-  const [ips, setIps] = useState<IPAddress[]>(mockData.ipAddresses);
-  const [vlans, setVlans] = useState<VLAN[]>(DEFAULT_VLANS);
+  const { token } = useAuth();
+  const [ips, setIps] = useState<IPAddress[]>([]);
+  const [vlans, setVlans] = useState<VLAN[]>([]);
+  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"ips" | "vlans" | "range">("ips");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterVlan, setFilterVlan] = useState("");
   const [checkIP, setCheckIP] = useState("");
   const [checkResult, setCheckResult] = useState<string | null>(null);
+
+  // Fetch IPs from API
+  const fetchIPs = useCallback(async () => {
+    if (!token) return;
+    try {
+      const params = new URLSearchParams();
+      if (filterStatus) params.set('status', filterStatus);
+      if (filterVlan) params.set('vlan', filterVlan);
+      if (search) params.set('search', search);
+      const res = await fetch(`${API_URL}/api/ip-addresses?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIps(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch IPs:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, filterStatus, filterVlan, search]);
+
+  // Fetch VLANs from API
+  const fetchVlans = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/vlans`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVlans(Array.isArray(data) ? data : DEFAULT_VLANS);
+      }
+    } catch {
+      setVlans(DEFAULT_VLANS);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchIPs();
+    fetchVlans();
+  }, [fetchIPs, fetchVlans]);
   const [showVlanForm, setShowVlanForm] = useState(false);
   const [vlanForm, setVlanForm] = useState<Partial<VLAN>>({});
+  const [editingVlan, setEditingVlan] = useState<VLAN | null>(null);
 
   // ── Full-page IP form state (like DevicesPage) ──
   const [mode, setMode] = useState<Mode>("list");
@@ -125,73 +172,141 @@ export default function IPAMPage() {
     });
   }, [ips, search, filterStatus, filterVlan]);
 
-  const saveIP = () => {
-    if (mode === "edit" && activeIP) {
-      setIps((prev) =>
-        prev.map((ip) =>
-          ip.id === activeIP.id
-            ? { ...ip, ipAddress: ipForm.ipAddress, vlanId: ipForm.vlanId, status: ipForm.status, type: ipForm.type, notes: ipForm.notes }
-            : ip,
-        ),
-      );
-      toast.success("IP address updated successfully");
-    } else {
-      const existing = ips.find((i) => i.ipAddress === ipForm.ipAddress);
-      const newIP: IPAddress = {
-        id: generateId(),
-        ipAddress: ipForm.ipAddress,
-        deviceId: null,
-        vlanId: ipForm.vlanId,
-        status: existing ? "Duplicate" : ipForm.status,
-        type: ipForm.type,
-        notes: ipForm.notes,
-        assignedAt: null,
-      };
-      setIps((prev) => [...prev, newIP]);
-      if (existing) {
-        toast.warning("IP address added as Duplicate — this address already exists");
+  const saveIP = async () => {
+    if (!token) return;
+    try {
+      if (mode === "edit" && activeIP) {
+        const res = await fetch(`${API_URL}/api/ip-addresses/${activeIP.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ ipAddress: ipForm.ipAddress, vlanId: ipForm.vlanId, status: ipForm.status, type: ipForm.type, notes: ipForm.notes }),
+        });
+        if (res.ok) {
+          toast.success("IP address updated successfully");
+          await fetchIPs();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast.error(err.error || 'Failed to update IP');
+        }
       } else {
-        toast.success("IP address added successfully");
+        const res = await fetch(`${API_URL}/api/ip-addresses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ ipAddress: ipForm.ipAddress, vlanId: ipForm.vlanId, status: ipForm.status, type: ipForm.type, notes: ipForm.notes }),
+        });
+        if (res.ok) {
+          toast.success("IP address added successfully");
+          await fetchIPs();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast.error(err.error || 'Failed to add IP');
+        }
       }
+    } catch {
+      toast.error('Network error');
     }
     goList();
   };
 
-  const deleteIP = (id: string) => {
-    if (confirm("Delete this IP?")) {
-      setIps((prev) => prev.filter((i) => i.id !== id));
-      toast.success("IP address deleted");
+  const deleteIP = async (id: string) => {
+    if (!confirm("Delete this IP?")) return;
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/ip-addresses/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success("IP address deleted");
+        await fetchIPs();
+      } else {
+        toast.error('Failed to delete IP');
+      }
+    } catch {
+      toast.error('Network error');
     }
   };
 
-  const checkAvailability = () => {
-    const found = ips.find((i) => i.ipAddress === checkIP);
-    setCheckResult(
-      found
-        ? `${checkIP} is ${found.status}${found.device ? ` — assigned to ${found.device.deviceName}` : ""}`
-        : `${checkIP} is Available (not in system)`,
-    );
+  const checkAvailability = async () => {
+    if (!token || !checkIP) return;
+    try {
+      const res = await fetch(`${API_URL}/api/ip-addresses/available?ip=${encodeURIComponent(checkIP)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCheckResult(
+          data.available
+            ? `${checkIP} is Available (not in system)`
+            : `${checkIP} is ${data.existing?.status || 'In Use'}${data.existing?.device?.deviceName ? ` — assigned to ${data.existing.device.deviceName}` : ''}`,
+        );
+      }
+    } catch {
+      setCheckResult('Failed to check availability');
+    }
   };
 
-  const addVlan = () => {
-    const v: VLAN = {
-      id: generateId(),
+  const saveVlan = async () => {
+    if (!token) return;
+    const payload = {
       vlanNumber: vlanForm.vlanNumber || 0,
-      name: vlanForm.name || "",
-      subnet: vlanForm.subnet || "",
-      gateway: vlanForm.gateway || "",
-      description: vlanForm.description || "",
+      name: vlanForm.name || '',
+      subnet: vlanForm.subnet || '',
+      gateway: vlanForm.gateway || '',
+      description: vlanForm.description || '',
     };
-    setVlans((prev) => [...prev, v]);
+    try {
+      if (editingVlan) {
+        const res = await fetch(`${API_URL}/api/vlans/${editingVlan.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          toast.success("VLAN updated successfully");
+          await fetchVlans();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast.error(err.error || 'Failed to update VLAN');
+        }
+      } else {
+        const res = await fetch(`${API_URL}/api/vlans`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          toast.success("VLAN added successfully");
+          await fetchVlans();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast.error(err.error || 'Failed to add VLAN');
+        }
+      }
+    } catch {
+      toast.error('Network error');
+    }
     setShowVlanForm(false);
     setVlanForm({});
-    toast.success("VLAN added successfully");
+    setEditingVlan(null);
   };
 
-  const deleteVlan = (id: string) => {
-    if (confirm("Delete this VLAN?")) {
-      setVlans((prev) => prev.filter((v) => v.id !== id));
-      toast.success("VLAN deleted");
+  const deleteVlan = async (id: string) => {
+    if (!confirm("Delete this VLAN?")) return;
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/vlans/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success("VLAN deleted");
+        await fetchVlans();
+      } else {
+        toast.error('Failed to delete VLAN');
+      }
+    } catch {
+      toast.error('Network error');
     }
   };
 
@@ -864,7 +979,7 @@ export default function IPAMPage() {
             }}
           >
             <button
-              onClick={() => setShowVlanForm(true)}
+              onClick={() => { setEditingVlan(null); setVlanForm({}); setShowVlanForm(true); }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -938,17 +1053,46 @@ export default function IPAMPage() {
                       </div>
                     </div>
                   </div>
-                  <button
-                    onClick={() => deleteVlan(v.id)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      onClick={() => {
+                        setEditingVlan(v);
+                        setVlanForm({ vlanNumber: v.vlanNumber, name: v.name, subnet: v.subnet, gateway: v.gateway, description: v.description });
+                        setShowVlanForm(true);
+                      }}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 6,
+                        border: "none",
+                        background: "var(--bg-tertiary)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#3B82F6",
+                      }}
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      onClick={() => deleteVlan(v.id)}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 6,
+                        border: "none",
+                        background: "var(--bg-tertiary)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#EF4444",
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
                 <div
                   style={{
@@ -1149,7 +1293,7 @@ export default function IPAMPage() {
                   fontFamily: "var(--font-heading)",
                 }}
               >
-                Add VLAN
+                {editingVlan ? 'Edit VLAN' : 'Add VLAN'}
               </h3>
               <button
                 onClick={() => setShowVlanForm(false)}
@@ -1240,7 +1384,7 @@ export default function IPAMPage() {
                 Cancel
               </button>
               <button
-                onClick={addVlan}
+                onClick={saveVlan}
                 style={{
                   padding: "10px 20px",
                   borderRadius: 8,
@@ -1252,7 +1396,7 @@ export default function IPAMPage() {
                   cursor: "pointer",
                 }}
               >
-                Add VLAN
+                {editingVlan ? 'Update VLAN' : 'Add VLAN'}
               </button>
             </div>
           </div>

@@ -51,16 +51,55 @@ router.get('/:id', authenticate, async (req, res) => {
   res.json(device);
 });
 
+// Helper: extract only valid Device model fields from request body
+function sanitizeDeviceData(body: any) {
+  const { ipAddress, vlanId, locationId, category, location, department, branch, employee, ...rest } = body;
+  // Convert empty strings to null for optional date fields and optional string fields
+  const optionalDateFields = ['purchaseDate', 'warrantyExpiration', 'lastMaintenance'];
+  const optionalStringFields = ['employeeId', 'branchId', 'departmentId', 'macAddress', 'notes', 'floor', 'room', 'building', 'dns', 'subnetMask', 'defaultGateway'];
+  for (const field of optionalDateFields) {
+    if (rest[field] === '' || rest[field] === null) {
+      rest[field] = null;
+    } else if (rest[field]) {
+      rest[field] = new Date(rest[field]);
+    }
+  }
+  for (const field of optionalStringFields) {
+    if (rest[field] === '') {
+      rest[field] = null;
+    }
+  }
+  return { deviceData: rest, ipAddress, vlanId };
+}
+
 router.post('/', authenticate, authorize('Admin', 'IT Manager', 'IT Support'), async (req: AuthRequest, res) => {
   try {
-    const device = await prisma.device.create({ data: { ...req.body, createdBy: req.userId }, include: { category: true } });
+    const { deviceData, ipAddress, vlanId } = sanitizeDeviceData(req.body);
+    const device = await prisma.device.create({ data: { ...deviceData, createdBy: req.userId }, include: { category: true, ipAddresses: true } });
+
+    // If IP address was provided, create an IPAddress record linked to this device
+    if (ipAddress) {
+      await prisma.iPAddress.create({
+        data: {
+          ipAddress,
+          deviceId: device.id,
+          vlanId: vlanId || null,
+          status: 'Assigned',
+          type: 'IPv4',
+        },
+      });
+    }
+
     await prisma.auditLog.create({ data: { userId: req.userId!, action: 'CREATE', entityType: 'Device', entityId: device.id, newValue: { deviceName: device.deviceName, assetTag: device.assetTag } as any, ipAddressSource: getClientIP(req) } });
+
+    // Re-fetch with IP addresses included
+    const full = await prisma.device.findUnique({ where: { id: device.id }, include: { category: true, ipAddresses: true } });
 
     // Notify monitor of new device
     const monitor = getMonitorService();
     if (monitor) monitor.onDeviceChanged(device.id);
 
-    res.status(201).json(device);
+    res.status(201).json(full);
   } catch (err) {
     res.status(400).json({ error: 'Failed to create device', message: (err as Error).message });
   }
@@ -69,17 +108,43 @@ router.post('/', authenticate, authorize('Admin', 'IT Manager', 'IT Support'), a
 router.put('/:id', authenticate, authorize('Admin', 'IT Manager', 'IT Support'), async (req: AuthRequest, res) => {
   try {
     const id = getParam(req, 'id');
-    const prev = await prisma.device.findUnique({ where: { id } });
-    const device = await prisma.device.update({ where: { id }, data: req.body, include: { category: true } });
+    const { deviceData, ipAddress, vlanId } = sanitizeDeviceData(req.body);
+    const prev = await prisma.device.findUnique({ where: { id }, include: { ipAddresses: true } });
+    const device = await prisma.device.update({ where: { id }, data: deviceData, include: { category: true, ipAddresses: true } });
+
+    // Update or create the IP address record for this device
+    if (ipAddress) {
+      const existingIP = prev?.ipAddresses?.[0];
+      if (existingIP) {
+        await prisma.iPAddress.update({
+          where: { id: existingIP.id },
+          data: { ipAddress, vlanId: vlanId || null },
+        });
+      } else {
+        await prisma.iPAddress.create({
+          data: {
+            ipAddress,
+            deviceId: device.id,
+            vlanId: vlanId || null,
+            status: 'Assigned',
+            type: 'IPv4',
+          },
+        });
+      }
+    }
+
     await prisma.auditLog.create({ data: { userId: req.userId!, action: 'UPDATE', entityType: 'Device', entityId: device.id, previousValue: prev ? { status: prev.status, deviceName: prev.deviceName } as any : undefined, newValue: { status: device.status, deviceName: device.deviceName } as any, ipAddressSource: getClientIP(req) } });
+
+    // Re-fetch with updated IPs
+    const full = await prisma.device.findUnique({ where: { id: device.id }, include: { category: true, ipAddresses: true } });
 
     // Notify monitor of device change (IP or status may have changed)
     const monitor = getMonitorService();
     if (monitor) monitor.onDeviceChanged(device.id);
 
-    res.json(device);
-  } catch {
-    res.status(400).json({ error: 'Failed to update device' });
+    res.json(full);
+  } catch (err) {
+    res.status(400).json({ error: 'Failed to update device', message: (err as Error).message });
   }
 });
 

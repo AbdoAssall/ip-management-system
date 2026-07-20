@@ -23,7 +23,7 @@ export default function LoginPage() {
       if (success) {
         navigate('/dashboard');
       } else {
-        setError('Invalid email or password. Try: admin@pscchc.com');
+        setError('Invalid email or password.');
       }
     } finally {
       setLoading(false);
@@ -201,7 +201,7 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@pscchc.com"
+                placeholder="Enter your email"
                 required
                 style={{
                   flex: 1,
@@ -281,20 +281,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div style={{ marginTop: 32, padding: '16px', borderRadius: 10, background: '#171c28', border: '1px solid #252d3d' }}>
-          <p style={{ color: '#6b7590', fontSize: 12, marginBottom: 8 }}>Demo Credentials:</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 12 }}>
-            <span style={{ color: '#a0aabe' }}>Admin:</span>
-            <span style={{ color: '#008793' }}>admin@pscchc.com</span>
-            <span style={{ color: '#a0aabe' }}>IT Manager:</span>
-            <span style={{ color: '#008793' }}>it.manager@pscchc.com</span>
-            <span style={{ color: '#a0aabe' }}>IT Support:</span>
-            <span style={{ color: '#008793' }}>it.support@pscchc.com</span>
-            <span style={{ color: '#a0aabe' }}>Read Only:</span>
-            <span style={{ color: '#008793' }}>viewer@pscchc.com</span>
-          </div>
-          <p style={{ color: '#6b7590', fontSize: 11, marginTop: 8 }}>Password: any value</p>
-        </div>
+
       </div>
     </div>
   );

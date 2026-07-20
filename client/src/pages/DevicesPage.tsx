@@ -1,11 +1,10 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { mockData } from '@/lib/mockData';
 import { DEVICE_CATEGORIES, STATUS_OPTIONS, DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS, DEVICE_BRANDS, SECURITY_LEVELS, BACKUP_STATUSES, DEFAULT_VLANS } from '@/lib/constants';
 import { formatDate, formatDateTime, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
-import type { Device } from '@/types';
+import type { Device, Employee } from '@/types';
 import { Plus, Search, Edit2, Trash2, Eye, ArrowLeft, Monitor, Server, Router, Network, Layers, Laptop, Fingerprint, Camera, Shield, Phone, Wifi, HardDrive, Globe, Save, UserCircle, Activity, RefreshCw } from 'lucide-react';
 
 const iconMap: Record<string, React.ElementType> = { Router, Network, Layers, Server, Monitor, Laptop, Fingerprint, Camera, Shield, Phone, Wifi };
@@ -29,6 +28,7 @@ export default function DevicesPage() {
   const [mode, setMode] = useState<Mode>('list');
   const [activeDevice, setActiveDevice] = useState<Device | null>(null);
   const [formTab, setFormTab] = useState(0);
+  const [employees, setEmployees] = useState<Employee[]>([]);
 
   // Fetch devices from API
   const fetchDevices = useCallback(async () => {
@@ -50,8 +50,7 @@ export default function DevicesPage() {
         setDevices(normalized);
       }
     } catch (err) {
-      console.warn('DevicesPage: API fetch failed, falling back to mock data', err);
-      setDevices(mockData.devices);
+      console.warn('DevicesPage: API fetch failed', err);
     } finally {
       setLoading(false);
     }
@@ -65,6 +64,17 @@ export default function DevicesPage() {
   useEffect(() => {
     if (isConnected) fetchDevices();
   }, [isConnected, fetchDevices]);
+
+  // Fetch employees for the Responsibility tab
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_URL}/api/employees`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => setEmployees(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [token]);
 
   const empty: Omit<Device, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> = {
     deviceName: '', assetTag: '', categoryId: 'cat-01', brand: '', model: '', serialNumber: '', hostname: '',
@@ -281,7 +291,7 @@ export default function DevicesPage() {
               {formTab === 0 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><div><label style={LS}>Device Name *</label><input value={form.deviceName} onChange={e => sf('deviceName', e.target.value)} style={IS} /></div><div><label style={LS}>Hostname</label><input value={form.hostname} onChange={e => sf('hostname', e.target.value)} style={IS} /></div><div><label style={LS}>Asset Tag *</label><input value={form.assetTag} onChange={e => sf('assetTag', e.target.value)} style={IS} /></div><div><label style={LS}>Serial Number</label><input value={form.serialNumber} onChange={e => sf('serialNumber', e.target.value)} style={IS} /></div><div><label style={LS}>Category</label><select value={form.categoryId} onChange={e => sf('categoryId', e.target.value)} style={SS}>{DEVICE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div><label style={LS}>Brand</label><select value={form.brand} onChange={e => sf('brand', e.target.value)} style={SS}><option value="">Select</option>{DEVICE_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}</select></div><div><label style={LS}>Model</label><input value={form.model} onChange={e => sf('model', e.target.value)} style={IS} /></div><div><label style={LS}>Status</label><select value={form.status} onChange={e => sf('status', e.target.value)} style={SS}>{STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}</select></div><div><label style={LS}>Purchase Date</label><input type="date" value={form.purchaseDate?.split('T')[0] || ''} onChange={e => sf('purchaseDate', e.target.value)} style={IS} /></div><div><label style={LS}>Warranty Expiration</label><input type="date" value={form.warrantyExpiration?.split('T')[0] || ''} onChange={e => sf('warrantyExpiration', e.target.value)} style={IS} /></div><div style={{ gridColumn: '1/-1' }}><label style={LS}>Notes</label><textarea value={form.notes} onChange={e => sf('notes', e.target.value)} rows={3} style={{ ...IS, resize: 'vertical' }} /></div></div>}
               {formTab === 1 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><div><label style={LS}>IP Address</label><input value={form.ipAddress} onChange={e => sf('ipAddress', e.target.value)} style={IS} placeholder="10.10.x.x" /></div><div><label style={LS}>Subnet Mask</label><input value={form.subnetMask} onChange={e => sf('subnetMask', e.target.value)} style={IS} /></div><div><label style={LS}>Default Gateway</label><input value={form.defaultGateway} onChange={e => sf('defaultGateway', e.target.value)} style={IS} /></div><div><label style={LS}>MAC Address</label><input value={form.macAddress} onChange={e => sf('macAddress', e.target.value)} style={IS} placeholder="AA:BB:CC:DD:EE:FF" /></div><div><label style={LS}>VLAN</label><select value={form.vlanId} onChange={e => sf('vlanId', e.target.value)} style={SS}>{DEFAULT_VLANS.map(v => <option key={v.id} value={v.id}>VLAN {v.vlanNumber} - {v.name}</option>)}</select></div><div><label style={LS}>DNS</label><input value={form.dns} onChange={e => sf('dns', e.target.value)} style={IS} /></div><div><label style={LS}>DHCP / Static</label><select value={form.dhcpStatic} onChange={e => sf('dhcpStatic', e.target.value)} style={SS}><option value="Static">Static</option><option value="DHCP">DHCP</option></select></div></div>}
               {formTab === 2 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><div><label style={LS}>Branch</label><select value={form.branchId} onChange={e => sf('branchId', e.target.value)} style={SS}>{DEFAULT_BRANCHES.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div><div><label style={LS}>Department</label><select value={form.departmentId} onChange={e => sf('departmentId', e.target.value)} style={SS}>{DEFAULT_DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div><div><label style={LS}>Building</label><input value={form.building} onChange={e => sf('building', e.target.value)} style={IS} /></div><div><label style={LS}>Floor</label><input value={form.floor} onChange={e => sf('floor', e.target.value)} style={IS} /></div><div><label style={LS}>Room</label><input value={form.room} onChange={e => sf('room', e.target.value)} style={IS} /></div></div>}
-              {formTab === 3 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><div style={{ gridColumn: '1/-1' }}><label style={LS}>Assigned Employee</label><select value={form.employeeId} onChange={e => sf('employeeId', e.target.value)} style={SS}><option value="">Select</option>{mockData.employees.map(emp => <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.employeeCode})</option>)}</select></div></div>}
+              {formTab === 3 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><div style={{ gridColumn: '1/-1' }}><label style={LS}>Assigned Employee</label><select value={form.employeeId} onChange={e => sf('employeeId', e.target.value)} style={SS}><option value="">Select</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.employeeCode})</option>)}</select></div></div>}
               {formTab === 4 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}><div><label style={LS}>Security Level</label><select value={form.securityLevel} onChange={e => sf('securityLevel', e.target.value)} style={SS}>{SECURITY_LEVELS.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div><label style={LS}>Backup Status</label><select value={form.backupStatus} onChange={e => sf('backupStatus', e.target.value)} style={SS}>{BACKUP_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div><label style={LS}>Last Maintenance</label><input type="date" value={form.lastMaintenance?.split('T')[0] || ''} onChange={e => sf('lastMaintenance', e.target.value)} style={IS} /></div><div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 24 }}><input type="checkbox" id="mon" checked={form.monitoringEnabled} onChange={e => sf('monitoringEnabled', e.target.checked)} /><label htmlFor="mon" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Monitoring Enabled</label></div></div>}
             </>
           )}

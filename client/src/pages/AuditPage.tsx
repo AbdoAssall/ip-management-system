@@ -1,32 +1,75 @@
-import { useState, useMemo } from 'react';
-import { mockData } from '@/lib/mockData';
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatDateTime } from '@/lib/utils';
-import { Search, Filter, ScrollText } from 'lucide-react';
+import { Search, ScrollText } from 'lucide-react';
+
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001');
 
 const inputStyle: React.CSSProperties = { width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' };
 
 const actionColors: Record<string, string> = { CREATE: '#10B981', UPDATE: '#3B82F6', DELETE: '#EF4444', LOGIN: '#8B5CF6', LOGOUT: '#6B7280', IP_CHANGE: '#F59E0B' };
 
+interface ApiAuditLog {
+  id: string;
+  userId: string;
+  user?: { fullName: string; email: string };
+  action: string;
+  entityType: string;
+  entityId: string;
+  previousValue: Record<string, unknown> | null;
+  newValue: Record<string, unknown> | null;
+  ipAddressSource: string;
+  createdAt: string;
+}
+
 export default function AuditPage() {
+  const { token } = useAuth();
+  const [logs, setLogs] = useState<ApiAuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterAction, setFilterAction] = useState('');
   const [filterEntity, setFilterEntity] = useState('');
 
-  const logs = useMemo(() => {
-    return mockData.auditLogs.filter((log) => {
-      const q = search.toLowerCase();
-      const user = mockData.users.find((u) => u.id === log.userId);
-      const matchSearch = !q || user?.fullName?.toLowerCase().includes(q) || log.entityType.toLowerCase().includes(q);
-      const matchAction = !filterAction || log.action === filterAction;
-      const matchEntity = !filterEntity || log.entityType === filterEntity;
-      return matchSearch && matchAction && matchEntity;
-    });
-  }, [search, filterAction, filterEntity]);
+  const fetchLogs = useCallback(async () => {
+    if (!token) return;
+    try {
+      const params = new URLSearchParams();
+      if (filterAction) params.set('action', filterAction);
+      if (filterEntity) params.set('entityType', filterEntity);
+      params.set('limit', '100');
+      const res = await fetch(`${API_URL}/api/audit-logs?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs || []);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch audit logs:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, filterAction, filterEntity]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
+
+  // Client-side search filter
+  const filtered = logs.filter((log) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      log.user?.fullName?.toLowerCase().includes(q) ||
+      log.entityType.toLowerCase().includes(q) ||
+      log.action.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="animate-fade-in">
       <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-heading)', marginBottom: 4 }}>Audit Logs</h2>
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>{logs.length} log entries</p>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>{filtered.length} log entries</p>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
         <div style={{ position: 'relative', flex: 1 }}>
@@ -44,6 +87,9 @@ export default function AuditPage() {
       </div>
 
       <div style={{ background: 'var(--bg-card)', borderRadius: 14, border: '1px solid var(--border-primary)', overflow: 'hidden' }}>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Loading audit logs...</div>
+        ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: 'var(--bg-tertiary)' }}>
@@ -53,14 +99,13 @@ export default function AuditPage() {
             </tr>
           </thead>
           <tbody>
-            {logs.map((log) => {
-              const user = mockData.users.find((u) => u.id === log.userId);
+            {filtered.map((log) => {
               return (
                 <tr key={log.id} style={{ borderBottom: '1px solid var(--border-secondary)' }}>
                   <td style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatDateTime(log.createdAt)}</td>
-                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-primary)' }}>{user?.fullName || 'Unknown'}</td>
+                  <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-primary)' }}>{log.user?.fullName || 'Unknown'}</td>
                   <td style={{ padding: '10px 16px' }}>
-                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: `${actionColors[log.action]}15`, color: actionColors[log.action], fontWeight: 600 }}>{log.action}</span>
+                    <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: `${actionColors[log.action] || '#6B7280'}15`, color: actionColors[log.action] || '#6B7280', fontWeight: 600 }}>{log.action}</span>
                   </td>
                   <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)' }}>{log.entityType}</td>
                   <td style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)', maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -74,8 +119,12 @@ export default function AuditPage() {
                 </tr>
               );
             })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>No audit logs found</td></tr>
+            )}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );

@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react';
-import { mockData } from '@/lib/mockData';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { DEVICE_CATEGORIES, DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS } from '@/lib/constants';
 import { formatDate, exportToCSV } from '@/lib/utils';
-import { FileBarChart, Download, FileText, Table, Printer } from 'lucide-react';
+import type { Device, IPAddress } from '@/types';
+import { Download, Table, Printer } from 'lucide-react';
 
-const inputStyle: React.CSSProperties = { width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border-primary)', background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'var(--font-body)', outline: 'none' };
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001');
 
 type ReportType = 'inventory' | 'asset' | 'ip' | 'maintenance' | 'warranty' | 'category';
 
@@ -18,18 +19,54 @@ const reportTypes: { key: ReportType; label: string; desc: string }[] = [
 ];
 
 export default function ReportsPage() {
+  const { token } = useAuth();
   const [selected, setSelected] = useState<ReportType>('inventory');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [ipAddresses, setIPAddresses] = useState<IPAddress[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const [devRes, ipRes] = await Promise.all([
+        fetch(`${API_URL}/api/devices?limit=500`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/ip-addresses`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      if (devRes.ok) {
+        const devData = await devRes.json();
+        const normalized = (devData.devices || []).map((d: any) => ({
+          ...d,
+          ipAddress: d.ipAddresses?.[0]?.ipAddress || d.ipAddress || '',
+          purchaseDate: d.purchaseDate || '',
+          warrantyExpiration: d.warrantyExpiration || '',
+          notes: d.notes || '',
+          lastMaintenance: d.lastMaintenance || '',
+        }));
+        setDevices(normalized);
+      }
+      if (ipRes.ok) {
+        const ipData = await ipRes.json();
+        setIPAddresses(Array.isArray(ipData) ? ipData : []);
+      }
+    } catch (err) {
+      console.warn('Reports: Failed to fetch data', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const reportData = useMemo(() => {
-    const devices = mockData.devices;
     switch (selected) {
       case 'inventory':
         return devices.map((d) => ({
-          'Device Name': d.deviceName, 'Asset Tag': d.assetTag, 'Category': DEVICE_CATEGORIES.find((c) => c.id === d.categoryId)?.name,
+          'Device Name': d.deviceName, 'Asset Tag': d.assetTag, 'Category': DEVICE_CATEGORIES.find((c) => c.id === d.categoryId)?.name || d.category?.name || '—',
           'IP Address': d.ipAddress, 'Status': d.status, 'Brand': d.brand, 'Model': d.model,
-          'Branch': DEFAULT_BRANCHES.find((b) => b.id === d.branchId)?.name, 'Department': DEFAULT_DEPARTMENTS.find((dp) => dp.id === d.departmentId)?.name,
+          'Branch': DEFAULT_BRANCHES.find((b) => b.id === d.branchId)?.name || d.branch?.name || '—', 'Department': DEFAULT_DEPARTMENTS.find((dp) => dp.id === d.departmentId)?.name || d.department?.name || '—',
         }));
       case 'asset':
         return devices.map((d) => ({
@@ -38,20 +75,20 @@ export default function ReportsPage() {
           'Brand': d.brand, 'Model': d.model, 'Status': d.status,
         }));
       case 'ip':
-        return mockData.ipAddresses.map((ip) => ({
+        return ipAddresses.map((ip) => ({
           'IP Address': ip.ipAddress, 'Status': ip.status, 'Device': ip.device?.deviceName || '—',
-          'VLAN': mockData.vlans.find((v) => v.id === ip.vlanId)?.name || '—', 'Type': ip.type,
+          'VLAN': ip.vlan?.name || '—', 'Type': ip.type,
         }));
       case 'warranty':
         return devices.map((d) => ({
           'Device': d.deviceName, 'Asset Tag': d.assetTag, 'Warranty Expires': formatDate(d.warrantyExpiration),
-          'Days Left': Math.ceil((new Date(d.warrantyExpiration).getTime() - Date.now()) / 86400000),
-          'Status': new Date(d.warrantyExpiration) > new Date() ? 'Active' : 'Expired',
+          'Days Left': d.warrantyExpiration ? Math.ceil((new Date(d.warrantyExpiration).getTime() - Date.now()) / 86400000) : '—',
+          'Status': d.warrantyExpiration && new Date(d.warrantyExpiration) > new Date() ? 'Active' : 'Expired',
         }));
       case 'maintenance':
         return devices.map((d) => ({
           'Device': d.deviceName, 'Last Maintenance': formatDate(d.lastMaintenance),
-          'Days Since': Math.ceil((Date.now() - new Date(d.lastMaintenance).getTime()) / 86400000),
+          'Days Since': d.lastMaintenance ? Math.ceil((Date.now() - new Date(d.lastMaintenance).getTime()) / 86400000) : '—',
           'Security Level': d.securityLevel, 'Monitoring': d.monitoringEnabled ? 'Yes' : 'No',
         }));
       case 'category':
@@ -63,7 +100,7 @@ export default function ReportsPage() {
       default:
         return [];
     }
-  }, [selected]);
+  }, [selected, devices, ipAddresses]);
 
   const headers = reportData.length > 0 ? Object.keys(reportData[0]) : [];
 
@@ -120,6 +157,9 @@ export default function ReportsPage() {
 
       {/* Report Table Preview */}
       <div style={{ background: 'var(--bg-card)', borderRadius: 14, border: '1px solid var(--border-primary)', overflow: 'hidden' }}>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Loading report data...</div>
+        ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -137,9 +177,13 @@ export default function ReportsPage() {
                   ))}
                 </tr>
               ))}
+              {reportData.length === 0 && (
+                <tr><td colSpan={headers.length || 1} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>No data available for this report</td></tr>
+              )}
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </div>
   );

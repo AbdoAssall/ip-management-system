@@ -1,5 +1,4 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { mockData } from "@/lib/mockData";
 import {
   DEVICE_CATEGORIES,
   DEFAULT_VLANS,
@@ -64,15 +63,19 @@ export default function DashboardPage() {
   // Real device data from API
   const [apiDevices, setApiDevices] = useState<Device[]>([]);
   const [apiStats, setApiStats] = useState<{ total: number; online: number; offline: number; maintenance: number; byCategory: { name: string; count: number; color: string }[] } | null>(null);
+  const [apiIPs, setApiIPs] = useState<{ ipAddress: string; status: string; vlanId: string; device?: { deviceName: string } }[]>([]);
+  const [apiAuditLogs, setApiAuditLogs] = useState<{ id: string; userId: string; user?: { fullName: string }; action: string; entityType: string; entityId: string; createdAt: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Fetch devices from API
   const fetchDevices = useCallback(async () => {
     if (!token) return;
     try {
-      const [devRes, statsRes] = await Promise.all([
+      const [devRes, statsRes, ipRes, auditRes] = await Promise.all([
         fetch(`${API_URL}/api/devices?limit=200`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_URL}/api/devices/stats`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/ip-addresses`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/audit-logs?limit=5`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       if (devRes.ok) {
         const devData = await devRes.json();
@@ -91,8 +94,16 @@ export default function DashboardPage() {
         const statsData = await statsRes.json();
         setApiStats(statsData);
       }
+      if (ipRes.ok) {
+        const ipData = await ipRes.json();
+        setApiIPs(Array.isArray(ipData) ? ipData : []);
+      }
+      if (auditRes.ok) {
+        const auditData = await auditRes.json();
+        setApiAuditLogs(auditData.logs || []);
+      }
     } catch (err) {
-      console.warn('Dashboard: API fetch failed, falling back to mock data', err);
+      console.warn('Dashboard: API fetch failed', err);
     } finally {
       setLoading(false);
     }
@@ -110,8 +121,8 @@ export default function DashboardPage() {
     if (isConnected) fetchDevices();
   }, [isConnected, fetchDevices]);
 
-  // Use API data if available, otherwise fall back to mockData
-  const devices = apiDevices.length > 0 ? apiDevices : mockData.devices;
+  // Use API data
+  const devices = apiDevices;
 
   // Merge WebSocket live status into device data
   const liveDevices = useMemo(() => {
@@ -127,7 +138,7 @@ export default function DashboardPage() {
 
   const stats = useMemo(() => {
     const devs = liveDevices;
-    const ips = mockData.ipAddresses;
+    const ips = apiIPs;
     const online = devs.filter((d) => d.status === "Online").length;
     const offline = devs.filter((d) => d.status === "Offline").length;
     const maintenance = devs.filter((d) => d.status === "Maintenance").length;
@@ -185,7 +196,7 @@ export default function DashboardPage() {
     };
   }, [liveDevices, apiStats]);
 
-  const recentActivity = useMemo(() => mockData.auditLogs.slice(0, 5), []);
+  const recentActivity = useMemo(() => apiAuditLogs.slice(0, 5), [apiAuditLogs]);
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
@@ -823,7 +834,8 @@ export default function DashboardPage() {
               }}
             >
               {stats.byCategory.map((cat) => {
-                const Icon = iconMap[cat.icon];
+                const catDef = DEVICE_CATEGORIES.find((c) => c.name === cat.name);
+                const Icon = catDef ? iconMap[catDef.icon] : undefined;
                 return (
                   <div
                     key={cat.name}

@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 import type { User } from '@/types';
-import { mockData } from '@/lib/mockData';
 
 const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3001');
 
@@ -26,7 +25,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
-    // Try API login first
     try {
       const res = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
@@ -43,22 +41,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return true;
         }
       }
-    } catch {
-      // API not available, fall back to mock
+      return false;
+    } catch (err) {
+      console.error('Login failed:', err);
+      return false;
     }
-
-    // Fallback to mock auth
-    const found = mockData.users.find((u) => u.email === email);
-    if (found) {
-      setUser(found);
-      // Generate a simple mock token for WebSocket (server won't validate in dev if secret matches)
-      const mockToken = 'mock-token-' + found.id;
-      setToken(mockToken);
-      localStorage.setItem('pscchc-user', JSON.stringify(found));
-      localStorage.setItem('pscchc-token', mockToken);
-      return true;
-    }
-    return false;
   }, []);
 
   const logout = useCallback(() => {
